@@ -1,0 +1,3 @@
+[reload]
+include = ["app/*"]
+exclude = [".venv/*", "**/__pycache__/*"]
