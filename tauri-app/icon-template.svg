@@ -1,0 +1,28 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="512" height="512" rx="80" fill="#2563eb"/>
+
+  <!-- Database icon -->
+  <g transform="translate(128, 100)">
+    <!-- Top cylinder -->
+    <ellipse cx="128" cy="50" rx="100" ry="30" fill="#60a5fa" stroke="#fff" stroke-width="8"/>
+
+    <!-- Middle cylinder -->
+    <rect x="28" y="50" width="200" height="180" fill="#3b82f6"/>
+    <ellipse cx="128" cy="230" rx="100" ry="30" fill="#1d4ed8" stroke="#fff" stroke-width="8"/>
+
+    <!-- Highlight lines -->
+    <path d="M 28 80 Q 128 110 228 80" stroke="#60a5fa" stroke-width="6" fill="none"/>
+    <path d="M 28 140 Q 128 170 228 140" stroke="#60a5fa" stroke-width="6" fill="none"/>
+  </g>
+
+  <!-- AI Sparkle -->
+  <g transform="translate(320, 140)">
+    <circle cx="0" cy="0" r="40" fill="#fbbf24" opacity="0.9"/>
+    <path d="M 0 -25 L 5 -5 L 25 0 L 5 5 L 0 25 L -5 5 L -25 0 L -5 -5 Z" fill="#fff"/>
+  </g>
+
+  <!-- Text -->
+  <text x="256" y="400" font-family="Arial, sans-serif" font-size="80" font-weight="bold" text-anchor="middle" fill="#fff">AI</text>
+  <text x="256" y="460" font-family="Arial, sans-serif" font-size="48" text-anchor="middle" fill="#93c5fd">DB</text>
+</svg>
