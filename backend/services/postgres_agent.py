@@ -1,0 +1,213 @@
+from .base_agent import BaseAgent
+from typing import List, Dict, Any
+import psycopg
+from psycopg.rows import dict_row
+from psycopg.errors import ObjectNotInPrerequisiteState
+import logging
+
+logger = logging.getLogger(__name__)  
+
+PG_TOP_SQL = """
+select query,
+       calls,
+       total_exec_time / nullif(calls,0) as mean_time_ms,
+       rows
+from pg_stat_statements
+order by total_exec_time desc
+limit %s;
+"""
+# Fallback: shows currently running longest queries (no history)
+PG_ACTIVITY_FALLBACK = """
+select
+  query,
+  1 as calls,
+  extract(milliseconds from (now() - query_start))::bigint as mean_time_ms,
+  0 as rows
+from pg_stat_activity
+where state <> 'idle'
+  and query not ilike '%pg_stat_activity%'
+order by mean_time_ms desc
+limit %s;
+"""
+
+class PostgresAgent(BaseAgent):
+    def get_db_type(self) -> str:
+        return "postgres"
+
+    def _conn(self):
+        return psycopg.connect(self.dsn, autocommit=True, row_factory=dict_row)
+
+    def get_schema(self) -> Dict[str, Any]:
+        sql = """
+        select table_schema, table_name, column_name, data_type, is_nullable
+        from information_schema.columns
+        where table_schema not in ('pg_catalog','information_schema')
+        order by table_schema, table_name, ordinal_position;
+        """
+        with self._conn() as c, c.cursor() as cur:
+            cur.execute(sql)
+            cols = cur.fetchall()
+        # group by table
+        schema: Dict[str, Any] = {}
+        for r in cols:
+            key = f"{r['table_schema']}.{r['table_name']}"
+            schema.setdefault(key, []).append(
+                {"column": r["column_name"], "type": r["data_type"], "nullable": r["is_nullable"]}
+            )
+        return {"tables": schema}
+
+    def get_top_queries(self, limit: int = 20, window_minutes: int = 60) -> List[Dict[str, Any]]:
+        with self._conn() as c, c.cursor() as cur:
+            try:
+                # try pg_stat_statements first
+                cur.execute("create extension if not exists pg_stat_statements;")
+                cur.execute(PG_TOP_SQL, (limit,))
+                rows = cur.fetchall()
+                for r in rows:
+                    r["source"] = "pg_stat_statements"
+                return rows
+            except ObjectNotInPrerequisiteState:
+                # extension not preloaded -> fallback to activity
+                cur.execute(PG_ACTIVITY_FALLBACK, (limit,))
+                rows = cur.fetchall()
+                for r in rows:
+                    r["source"] = "pg_stat_activity"
+                    r["note"] = "pg_stat_statements unavailable; showing longest currently running queries"
+                return rows
+
+    def explain(self, sql: str, analyze: bool = False) -> Dict[str, Any]:
+        with self._conn() as c, c.cursor() as cur:
+            fmt = "EXPLAIN (FORMAT JSON{}) ".format(", ANALYZE, BUFFERS" if analyze else "")
+            cur.execute(fmt + sql)
+            plan = cur.fetchone()
+        return {"plan": plan["QUERY PLAN"] if "QUERY PLAN" in plan else list(plan.values())[0]}
+
+    def locks(self) -> List[Dict[str, Any]]:
+        q = """
+        select locktype, mode, granted, l.pid, now()-query_start as age, query
+        from pg_locks l
+        join pg_stat_activity a on a.pid = l.pid
+        order by granted asc, age desc;
+        """
+        with self._conn() as c, c.cursor() as cur:
+            cur.execute(q)
+            return cur.fetchall()
+
+    def stats(self) -> Dict[str, Any]:
+        q = """
+        select
+          (select sum(pg_database_size(datname)) from pg_database)::bigint as total_db_size,
+          (select numbackends from pg_stat_database where datname = current_database() limit 1) as active_backends;
+        """
+        with self._conn() as c, c.cursor() as cur:
+            cur.execute(q)
+            return cur.fetchone()
+
+    def _ensure_hypopg(self, cur) -> bool:
+        try:
+            cur.execute("create extension if not exists hypopg;")
+            return True
+        except Exception:
+            return False  # not installed
+
+    def hypothetical_index(self, table, columns, include=None, method=None):
+        with self._conn() as c, c.cursor() as cur:
+            if not self._ensure_hypopg(cur):
+                return {"hypo_stmt": None, "hypopg_available": False}
+            meth = method or "btree"
+            cols = ", ".join(columns)
+            inc  = f" INCLUDE ({', '.join(include)})" if include else ""
+            stmt = f"CREATE INDEX ON {table} USING {meth} ({cols}){inc};"
+            cur.execute("select * from hypopg_create_index(%s);", (stmt,))
+            return {"hypo_stmt": stmt, "hypopg_available": True}
+
+    def plan_with_hypo(self, sql: str, idx_stmt: str):
+        with self._conn() as c, c.cursor() as cur:
+            if not self._ensure_hypopg(cur) or not idx_stmt:
+                # Fallback: plain plan only
+                cur.execute("EXPLAIN (FORMAT JSON) " + sql)
+                return {"plan": cur.fetchone()["QUERY PLAN"], "validated": False}
+            cur.execute("select * from hypopg_reset();")
+            cur.execute("select * from hypopg_create_index(%s);", (idx_stmt,))
+            cur.execute("EXPLAIN (FORMAT JSON) " + sql)
+            return {"plan": cur.fetchone()["QUERY PLAN"], "validated": True}
+
+    def get_existing_indexes(self, table_name: str = None) -> List[Dict[str, Any]]:
+        """
+        Get all existing indexes, optionally filtered by table.
+
+        Returns list of indexes with:
+        - table_name: Full qualified table name
+        - index_name: Name of the index
+        - columns: List of column names in index order
+        - is_unique: Whether index is unique
+        - index_type: btree, gin, gist, etc.
+        """
+        # Query to get all indexes with their columns
+        query = """
+        SELECT
+            n.nspname || '.' || t.relname AS table_name,
+            t.relname AS table_name_short,
+            i.relname AS index_name,
+            array_agg(a.attname ORDER BY array_position(ix.indkey, a.attnum)) AS columns,
+            ix.indisunique AS is_unique,
+            am.amname AS index_type
+        FROM pg_class t
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_index ix ON t.oid = ix.indrelid
+        JOIN pg_class i ON i.oid = ix.indexrelid
+        JOIN pg_am am ON i.relam = am.oid
+        JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
+        WHERE t.relkind = 'r'
+          AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+          AND a.attnum > 0
+        """
+
+        params = []
+        if table_name:
+            # Support both "table" and "schema.table" formats
+            query += " AND (t.relname = %s OR n.nspname || '.' || t.relname = %s)"
+            params = [table_name, table_name]
+
+        query += """
+        GROUP BY n.nspname, t.relname, i.relname, ix.indisunique, am.amname
+        ORDER BY table_name, index_name;
+        """
+
+        with self._conn() as c, c.cursor() as cur:
+            cur.execute(query, params)
+            rows = cur.fetchall()
+
+        return rows
+
+    def index_exists(self, table_name: str, columns: List[str]) -> bool:
+        """
+        Check if an index already exists on the given table with the exact column set.
+
+        Args:
+            table_name: Table name (with or without schema)
+            columns: List of column names (order matters for composite indexes)
+
+        Returns:
+            True if an index with matching columns exists
+        """
+        existing = self.get_existing_indexes(table_name)
+
+        # Normalize columns for comparison (lowercase)
+        columns_normalized = [c.lower().strip() for c in columns]
+
+        logger.debug(f"Checking if index exists on {table_name}({', '.join(columns_normalized)})")
+        logger.debug(f"Found {len(existing)} existing indexes on {table_name}")
+
+        for idx in existing:
+            idx_columns = [c.lower().strip() for c in idx['columns']]
+            logger.debug(f"  Comparing with {idx['index_name']}: ({', '.join(idx_columns)})")
+
+            # Check if columns match (exact order or subset)
+            # An index on (a, b, c) can serve queries on (a), (a, b), or (a, b, c)
+            if columns_normalized == idx_columns[:len(columns_normalized)]:
+                logger.info(f"✓ Index match found: {idx['index_name']} on {table_name}({', '.join(idx['columns'])}) - suggestion will be skipped")
+                return True
+
+        logger.debug(f"✗ No matching index found on {table_name}({', '.join(columns_normalized)})")
+        return False

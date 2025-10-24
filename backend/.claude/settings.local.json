@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/chowh/OneDrive/Desktop/ai-db-advisor/.venv/**)",
+      "Read(//c/Users/chowh/OneDrive/Desktop/ai-db-advisor/**)",
+      "Bash(python:*)",
+      "WebSearch",
+      "Bash(curl -s http://127.0.0.1:8000/healthz)",
+      "Bash(curl -s http://127.0.0.1:8000/)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
