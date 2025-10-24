@@ -1,0 +1,25 @@
+[package]
+name = "ai-db-advisor-desktop"
+version = "1.0.0"
+description = "AI Database Performance Advisor Desktop Application"
+authors = ["AI DB Advisor Team"]
+license = ""
+repository = ""
+edition = "2021"
+
+[lib]
+name = "ai_db_advisor_desktop_lib"
+crate-type = ["staticlib", "cdylib", "lib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

@@ -1,0 +1,180 @@
+groups:
+  # FastAPI Backend Alerts
+  - name: fastapi_alerts
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{job="ai-db-advisor-app",status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="ai-db-advisor-app"}[5m]))
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          service: fastapi
+        annotations:
+          summary: "High error rate on FastAPI backend"
+          description: "Error rate is {{ $value | humanizePercentage }}. More than 5% of requests are failing."
+          dashboard: "http://localhost:3001/d/fastapi-backend"
+
+      - alert: SlowAPIResponse
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="ai-db-advisor-app"}[5m])) > 2
+        for: 3m
+        labels:
+          severity: warning
+          service: fastapi
+        annotations:
+          summary: "Slow API responses detected"
+          description: "95th percentile response time is {{ $value }}s (threshold: 2s)"
+          dashboard: "http://localhost:3001/d/fastapi-backend"
+
+      - alert: HighRequestLoad
+        expr: sum(rate(http_requests_total{job="ai-db-advisor-app"}[1m])) > 100
+        for: 2m
+        labels:
+          severity: warning
+          service: fastapi
+        annotations:
+          summary: "High request load on FastAPI"
+          description: "Request rate is {{ $value }} req/sec (threshold: 100 req/sec)"
+          dashboard: "http://localhost:3001/d/fastapi-backend"
+
+      - alert: TooManyActiveRequests
+        expr: http_requests_inprogress{job="ai-db-advisor-app"} > 50
+        for: 1m
+        labels:
+          severity: warning
+          service: fastapi
+        annotations:
+          summary: "Too many concurrent requests"
+          description: "{{ $value }} requests are being processed concurrently (threshold: 50)"
+          dashboard: "http://localhost:3001/d/fastapi-backend"
+
+      - alert: FastAPIDown
+        expr: up{job="ai-db-advisor-app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: fastapi
+        annotations:
+          summary: "FastAPI backend is down"
+          description: "FastAPI service is not responding to health checks"
+          dashboard: "http://localhost:3001/d/fastapi-backend"
+
+  # MCP Bridge Alerts
+  - name: mcp_alerts
+    interval: 30s
+    rules:
+      - alert: MCPServerDown
+        expr: mcp_server_status{job="mcp-bridge"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: mcp
+        annotations:
+          summary: "MCP server is down"
+          description: "MCP bridge reports server status as DOWN"
+          dashboard: "http://localhost:3001/d/mcp-bridge"
+
+      - alert: MCPHighErrorRate
+        expr: |
+          (
+            sum(rate(mcp_requests_total{job="mcp-bridge",status="error"}[5m]))
+            /
+            sum(rate(mcp_requests_total{job="mcp-bridge"}[5m]))
+          ) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: mcp
+        annotations:
+          summary: "High MCP error rate"
+          description: "MCP error rate is {{ $value | humanizePercentage }} (threshold: 10%)"
+          dashboard: "http://localhost:3001/d/mcp-bridge"
+
+      - alert: MCPSlowResponses
+        expr: histogram_quantile(0.95, rate(mcp_request_duration_seconds_bucket{job="mcp-bridge"}[5m])) > 3
+        for: 3m
+        labels:
+          severity: warning
+          service: mcp
+        annotations:
+          summary: "Slow MCP responses"
+          description: "95th percentile MCP response time is {{ $value }}s (threshold: 3s)"
+          dashboard: "http://localhost:3001/d/mcp-bridge"
+
+      - alert: MCPNoToolsDiscovered
+        expr: mcp_tools_discovered{job="mcp-bridge"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: mcp
+        annotations:
+          summary: "No MCP tools discovered"
+          description: "MCP bridge has not discovered any tools"
+          dashboard: "http://localhost:3001/d/mcp-bridge"
+
+      - alert: MCPBridgeDown
+        expr: up{job="mcp-bridge"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: mcp
+        annotations:
+          summary: "MCP bridge is down"
+          description: "MCP bridge service is not responding"
+          dashboard: "http://localhost:3001/d/mcp-bridge"
+
+  # PostgreSQL Database Alerts
+  - name: postgres_alerts
+    interval: 30s
+    rules:
+      - alert: PostgreSQLDown
+        expr: pg_up{job="postgres-universitydb"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: postgresql
+        annotations:
+          summary: "PostgreSQL database is down"
+          description: "UniversityDB database is not responding"
+          dashboard: "http://localhost:3001/d/postgres"
+
+      - alert: HighDatabaseConnections
+        expr: pg_stat_database_numbackends{job="postgres-universitydb"} > 80
+        for: 3m
+        labels:
+          severity: warning
+          service: postgresql
+        annotations:
+          summary: "High database connection count"
+          description: "{{ $value }} active connections (threshold: 80)"
+          dashboard: "http://localhost:3001/d/postgres"
+
+      - alert: TooManyDatabaseLocks
+        expr: sum(pg_locks_count{job="postgres-universitydb"}) > 100
+        for: 2m
+        labels:
+          severity: warning
+          service: postgresql
+        annotations:
+          summary: "Too many database locks"
+          description: "{{ $value }} locks detected (threshold: 100)"
+          dashboard: "http://localhost:3001/d/postgres"
+
+  # System-wide Alerts
+  - name: system_alerts
+    interval: 30s
+    rules:
+      - alert: HighPythonGCActivity
+        expr: rate(python_gc_collections_total{job="ai-db-advisor-app"}[5m]) > 10
+        for: 5m
+        labels:
+          severity: info
+          service: fastapi
+        annotations:
+          summary: "High Python garbage collection activity"
+          description: "GC rate is {{ $value }} collections/sec - may indicate memory pressure"
+          dashboard: "http://localhost:3001/d/fastapi-backend"
