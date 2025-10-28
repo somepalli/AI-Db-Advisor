@@ -41,6 +41,8 @@ export function ConnectionPanel({ onSelectDataSource, selectedDataSource }: Prop
       case 'sqlserver':
       case 'mssql':
         return 'mssql://user:pass@host:1433/db';
+      case 'clickhouse':
+        return 'clickhouse://user:pass@host:8123/db';
       case 'mongodb':
       case 'mongo':
         return 'mongodb://user:pass@host:27017/db';
@@ -230,6 +232,7 @@ export function ConnectionPanel({ onSelectDataSource, selectedDataSource }: Prop
                               <SelectItem value="mysql">MySQL / MariaDB</SelectItem>
                               <SelectItem value="sqlserver">Microsoft SQL Server</SelectItem>
                               <SelectItem value="oracle">Oracle Database</SelectItem>
+                              <SelectItem value="clickhouse">ClickHouse</SelectItem>
                             </SelectGroup>
                             <SelectGroup>
                               <SelectLabel>NoSQL Databases</SelectLabel>

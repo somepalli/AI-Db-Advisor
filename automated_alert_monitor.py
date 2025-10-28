@@ -19,7 +19,7 @@ import sys
 class AutomatedAlertMonitor:
     """Automated monitoring using FastAPI backend"""
 
-    def __init__(self, api_base_url="http://127.0.0.1:8000", interval_seconds=10):
+    def __init__(self, api_base_url="http://127.0.0.1:8095", interval_seconds=10):
         self.api_base = api_base_url
         self.interval = interval_seconds
         self.running = True
@@ -280,15 +280,15 @@ Examples:
   python automated_alert_monitor.py --interval 5
 
   # Monitor with custom API URL
-  python automated_alert_monitor.py --api http://localhost:8000
+  python automated_alert_monitor.py --api http://localhost:8095
         """
     )
 
     parser.add_argument(
         '--api',
         type=str,
-        default='http://127.0.0.1:8000',
-        help='FastAPI base URL (default: http://127.0.0.1:8000)'
+        default='http://127.0.0.1:8095',
+        help='FastAPI base URL (default: http://127.0.0.1:8095)'
     )
 
     parser.add_argument(

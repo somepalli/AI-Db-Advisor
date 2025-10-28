@@ -68,7 +68,7 @@ interface Summary {
 // AlertPanel Component
 // ============================================================================
 
-const API_BASE = 'http://127.0.0.1:8000';
+const API_BASE = 'http://127.0.0.1:8095';
 
 export default function AlertPanel() {
   const [activeTab, setActiveTab] = useState<TabType>('current');

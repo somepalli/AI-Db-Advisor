@@ -11,6 +11,7 @@ from .oracle_agent import OracleAgent
 from .redis_agent import RedisAgent
 from .sqlite_agent import SQLiteAgent
 from .cassandra_agent import CassandraAgent
+from .clickhouse_agent import ClickHouseAgent
 
 # Supported database engines
 SUPPORTED_ENGINES = {
@@ -46,6 +47,11 @@ SUPPORTED_ENGINES = {
     # Cassandra
     "cassandra": CassandraAgent,
     "cassandra-db": CassandraAgent,
+
+    # ClickHouse
+    "clickhouse": ClickHouseAgent,
+    "clickhouse+http": ClickHouseAgent,
+    "clickhouse+https": ClickHouseAgent,
 }
 
 def get_agent_for(engine: str, dsn: str) -> BaseAgent:

@@ -1,20 +1,19 @@
 """
 MCP Bridge Server - HTTP wrapper for MCP servers (stdio to HTTP)
 
-This bridge server wraps MCP servers that communicate via stdio (like postgres-mcp)
+This bridge server wraps MCP servers that communicate via stdio (Toolbox in --stdio mode)
 and exposes them as HTTP endpoints for easy consumption by the AI DB Advisor.
 
-Usage:
-    python mcp_bridge_server.py
-
-Configuration:
-    Set POSTGRES_DSN environment variable with your PostgreSQL connection string
-    Example: postgresql://user:password@localhost:5432/database
+Environment variables:
+    TOOLBOX_MODE=docker|binary (default: docker)
+    TOOLBOX_TOOLS_FILE=path/to/tools.yaml
+    TOOLBOX_IMAGE=us-central1-docker.pkg.dev/database-toolbox/toolbox/toolbox:VERSION
+    TOOLBOX_CLICKHOUSE_* overrides for Toolbox source credentials
 """
 import asyncio
 import json
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import subprocess
@@ -23,12 +22,23 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-env_path = Path(__file__).parent / ".env"
-if env_path.exists():
-    load_dotenv(dotenv_path=env_path)
-    logger_init = logging.getLogger(__name__)
-    logger_init.info(f"Loaded environment from {env_path}")
+# Load environment variables from local env files
+logger_init = logging.getLogger(__name__)
+
+base_env_path = Path(__file__).parent / ".env"
+if base_env_path.exists():
+    load_dotenv(dotenv_path=base_env_path)
+    logger_init.info(f"Loaded environment from {base_env_path}")
+
+clickhouse_env_path = Path(__file__).parent / ".env.clickhouse"
+if clickhouse_env_path.exists():
+    load_dotenv(dotenv_path=clickhouse_env_path, override=False)
+    logger_init.info(f"Loaded ClickHouse environment from {clickhouse_env_path}")
+
+toolbox_env_path = Path(__file__).parent / ".env.toolbox"
+if toolbox_env_path.exists():
+    load_dotenv(dotenv_path=toolbox_env_path, override=False)
+    logger_init.info(f"Loaded Toolbox environment from {toolbox_env_path}")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -217,6 +227,107 @@ class MCPProcess:
 
 # Global MCP process instance
 mcp_process: Optional[MCPProcess] = None
+ACTIVE_TOOLS_FILE: Optional[str] = None
+ACTIVE_TOOLBOX_MODE: Optional[str] = None
+
+
+def build_toolbox_command() -> Tuple[List[str], Dict[str, str]]:
+    """
+    Build the command used to launch the Toolbox MCP server.
+
+    Returns:
+        Tuple of (command list, environment overrides)
+    """
+    global ACTIVE_TOOLS_FILE, ACTIVE_TOOLBOX_MODE
+
+    tools_file_env = os.getenv("TOOLBOX_TOOLS_FILE")
+    if tools_file_env:
+        tools_path = Path(tools_file_env)
+        if not tools_path.is_absolute():
+            tools_path = (Path(__file__).parent / tools_path).resolve()
+    else:
+        tools_path = (Path(__file__).parent / "toolbox" / "tools.yaml").resolve()
+
+    if not tools_path.exists():
+        raise FileNotFoundError(f"Toolbox configuration not found at {tools_path}")
+
+    ACTIVE_TOOLS_FILE = str(tools_path)
+    toolbox_mode = os.getenv("TOOLBOX_MODE", "docker").lower()
+    ACTIVE_TOOLBOX_MODE = toolbox_mode
+
+    toolbox_image = os.getenv(
+        "TOOLBOX_IMAGE",
+        os.getenv("TOOLBOX_DOCKER_IMAGE", "us-central1-docker.pkg.dev/database-toolbox/toolbox/toolbox:0.11.0"),
+    )
+    container_tools_path = os.getenv("TOOLBOX_CONTAINER_TOOLS_PATH", "/app/tools.yaml")
+
+    clickhouse_host = os.getenv("TOOLBOX_CLICKHOUSE_HOST", os.getenv("CLICKHOUSE_HOST", "host.docker.internal"))
+    clickhouse_port = os.getenv("TOOLBOX_CLICKHOUSE_PORT", os.getenv("CLICKHOUSE_PORT", "8123"))
+    clickhouse_protocol = os.getenv("TOOLBOX_CLICKHOUSE_PROTOCOL", os.getenv("CLICKHOUSE_PROTOCOL", "http"))
+    clickhouse_db = os.getenv("TOOLBOX_CLICKHOUSE_DATABASE", os.getenv("CLICKHOUSE_DATABASE", "ai_db_advisor"))
+    clickhouse_user = os.getenv("TOOLBOX_CLICKHOUSE_USER", "toolbox_reader")
+    clickhouse_password = os.getenv("TOOLBOX_CLICKHOUSE_PASSWORD", "REDACTED")
+    toolbox_api_key = os.getenv("TOOLBOX_API_KEY", "REDACTED")
+
+    toolbox_env = {
+        "CLICKHOUSE_HOST": clickhouse_host,
+        "CLICKHOUSE_PORT": str(clickhouse_port),
+        "CLICKHOUSE_PROTOCOL": clickhouse_protocol,
+        "CLICKHOUSE_DATABASE": clickhouse_db,
+        "CLICKHOUSE_USER": clickhouse_user,
+        "CLICKHOUSE_PASSWORD": clickhouse_password,
+        "TOOLBOX_API_KEY": toolbox_api_key,
+    }
+
+    if toolbox_mode == "binary":
+        toolbox_binary = os.getenv("TOOLBOX_BINARY") or shutil.which("toolbox")
+        if not toolbox_binary:
+            raise RuntimeError(
+                "Toolbox binary not found. Set TOOLBOX_BINARY or install the toolbox CLI to use binary mode."
+            )
+
+        command = [
+            toolbox_binary,
+            "--stdio",
+            f"--tools-file={ACTIVE_TOOLS_FILE}",
+            "--log-level=INFO",
+            "--disable-reload",
+        ]
+        env_overrides = toolbox_env
+    else:
+        command: List[str] = [
+            "docker",
+            "run",
+            "--rm",
+            "-i",
+            "--add-host=host.docker.internal:host-gateway",
+            "-v",
+            f"{ACTIVE_TOOLS_FILE}:{container_tools_path}:ro",
+        ]
+
+        custom_network = os.getenv("TOOLBOX_DOCKER_NETWORK")
+        if custom_network:
+            command.extend(["--network", custom_network])
+
+        additional_args = os.getenv("TOOLBOX_DOCKER_ARGS")
+        if additional_args:
+            command.extend(additional_args.split())
+
+        for key, value in toolbox_env.items():
+            command.extend(["-e", f"{key}={value}"])
+
+        command.append(toolbox_image)
+        command.extend(
+            [
+                "--stdio",
+                f"--tools-file={container_tools_path}",
+                "--log-level=INFO",
+                "--disable-reload",
+            ]
+        )
+        env_overrides = {}
+
+    return command, env_overrides
 
 
 @asynccontextmanager
@@ -224,26 +335,16 @@ async def lifespan(app: FastAPI):
     """Lifespan events for FastAPI"""
     global mcp_process
 
-    # Startup: Start MCP process
-    postgres_dsn = os.getenv("POSTGRES_DSN")
-    if not postgres_dsn:
-        logger.warning("POSTGRES_DSN not set. Please set it to enable postgres-mcp.")
-        logger.warning("Example: POSTGRES_DSN=postgresql://user:password@localhost:5432/database")
-        # Don't start MCP process, but keep server running for demo mode
-    else:
-        try:
-            # Use crystaldba/postgres-mcp for advanced optimization features
-            # This provides: analyze_workload_indexes, get_top_queries, analyze_db_health, etc.
-            mcp_process = MCPProcess(
-                command=["python", "-m", "postgres_mcp", postgres_dsn],
-                env={"POSTGRES_DSN": postgres_dsn}
-            )
-            await mcp_process.start()
-            logger.info("MCP bridge server started successfully with crystaldba/postgres-mcp")
-        except Exception as e:
-            logger.error(f"Failed to start MCP process: {e}")
-            logger.info("Note: Make sure postgres-mcp is installed: pipx install postgres-mcp")
-            mcp_process = None
+    # Startup: start Toolbox MCP process
+    try:
+        command, env_overrides = build_toolbox_command()
+        logger.info("Launching Toolbox MCP server with command: %s", " ".join(command))
+        mcp_process = MCPProcess(command=command, env=env_overrides)
+        await mcp_process.start()
+        logger.info("Toolbox MCP bridge server started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start Toolbox MCP process: {e}")
+        mcp_process = None
 
     yield
 
@@ -265,7 +366,8 @@ async def health_check():
     return {
         "status": "healthy" if mcp_process else "degraded",
         "mcp_enabled": mcp_process is not None,
-        "postgres_dsn_configured": bool(os.getenv("POSTGRES_DSN"))
+        "toolbox_mode": ACTIVE_TOOLBOX_MODE,
+        "tools_file": ACTIVE_TOOLS_FILE,
     }
 
 
@@ -281,7 +383,7 @@ async def list_tools():
         # Return empty list in demo mode
         return {
             "tools": [],
-            "note": "POSTGRES_DSN not configured. Set environment variable to enable postgres-mcp."
+            "note": "Toolbox MCP process is not active. Check toolbox configuration and restart."
         }
 
     try:
@@ -352,8 +454,8 @@ if __name__ == "__main__":
     port = int(os.getenv("MCP_BRIDGE_PORT", "3000"))
 
     logger.info(f"Starting MCP Bridge Server on port {port}")
-    logger.info("Set POSTGRES_DSN environment variable to enable postgres-mcp")
-    logger.info("Example: POSTGRES_DSN=postgresql://postgres:postgres@localhost:5432/UniversityDB")
+    logger.info("Toolbox MCP bridge expects toolbox/tools.yaml and ClickHouse credentials to be configured.")
+    logger.info("Override defaults with TOOLBOX_* environment variables if needed.")
 
     uvicorn.run(
         app,

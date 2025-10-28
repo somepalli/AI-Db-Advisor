@@ -78,31 +78,31 @@ groups:
           description: "MCP bridge reports server status as DOWN"
           dashboard: "http://localhost:3001/d/mcp-bridge"
 
-      - alert: MCPHighErrorRate
+      - alert: MCPServerErrors
         expr: |
           (
             sum(rate(mcp_requests_total{job="mcp-bridge",status="error"}[5m]))
             /
             sum(rate(mcp_requests_total{job="mcp-bridge"}[5m]))
-          ) > 0.1
-        for: 2m
+          ) > 0.05
+        for: 5m
         labels:
           severity: warning
           service: mcp
         annotations:
-          summary: "High MCP error rate"
-          description: "MCP error rate is {{ $value | humanizePercentage }} (threshold: 10%)"
+          summary: "MCP bridge error rate elevated"
+          description: "Error responses exceed 5% over the last 5 minutes (value: {{ $value | humanizePercentage }})."
           dashboard: "http://localhost:3001/d/mcp-bridge"
 
-      - alert: MCPSlowResponses
-        expr: histogram_quantile(0.95, rate(mcp_request_duration_seconds_bucket{job="mcp-bridge"}[5m])) > 3
-        for: 3m
+      - alert: MCPLatencyHigh
+        expr: histogram_quantile(0.95, rate(mcp_request_duration_seconds_bucket{job="mcp-bridge"}[10m])) > 2
+        for: 10m
         labels:
-          severity: warning
+          severity: info
           service: mcp
         annotations:
-          summary: "Slow MCP responses"
-          description: "95th percentile MCP response time is {{ $value }}s (threshold: 3s)"
+          summary: "MCP bridge latency elevated"
+          description: "95th percentile MCP response time is {{ $value }}s (threshold: 2s)."
           dashboard: "http://localhost:3001/d/mcp-bridge"
 
       - alert: MCPNoToolsDiscovered
@@ -126,6 +126,155 @@ groups:
           summary: "MCP bridge is down"
           description: "MCP bridge service is not responding"
           dashboard: "http://localhost:3001/d/mcp-bridge"
+
+  - name: clickhouse_alerts
+    interval: 30s
+    rules:
+      - alert: ClickHouseDown
+        expr: up{job="clickhouse"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: clickhouse
+        annotations:
+          summary: "ClickHouse exporter unreachable"
+          description: "ClickHouse metrics endpoint has been down for over a minute."
+          dashboard: "http://localhost:3001/d/clickhouse-overview"
+
+      - alert: ClickHousePingSlow
+        expr: |
+          (increase(clickhouse_select_query_total[5m]) > 0)
+          and
+          (
+            increase(clickhouse_select_query_time_microseconds_total[5m])
+            /
+            increase(clickhouse_select_query_total[5m])
+          ) > 500000
+        for: 5m
+        labels:
+          severity: warning
+          service: clickhouse
+        annotations:
+          summary: "ClickHouse average SELECT latency high"
+          description: 'Average SELECT latency over the last 5m is above 500ms. Value: {{ printf "%.0f" $value }} μs'
+          dashboard: "http://localhost:3001/d/clickhouse-overview"
+
+      - alert: QueryErrorSpike
+        expr: delta(clickhouse_query_preempted[5m]) > 5
+        for: 5m
+        labels:
+          severity: critical
+          service: clickhouse
+        annotations:
+          summary: "Spike in preempted ClickHouse queries"
+          description: "More than five queries were preempted in the last 5 minutes, indicating possible errors or cancellations."
+          dashboard: "http://localhost:3001/d/clickhouse-overview"
+
+      - alert: QueryLatencyHigh
+        expr: |
+          (increase(clickhouse_select_query_total[10m]) > 0)
+          and
+          (
+            increase(clickhouse_select_query_time_microseconds_total[10m])
+            /
+            increase(clickhouse_select_query_total[10m])
+          ) > 300000
+        for: 10m
+        labels:
+          severity: warning
+          service: clickhouse
+        annotations:
+          summary: "Sustained ClickHouse query latency"
+          description: 'Average SELECT latency has remained above 300ms for 10 minutes. Value: {{ printf "%.0f" $value }} μs'
+          dashboard: "http://localhost:3001/d/clickhouse-overview"
+
+      - alert: InsertStall
+        expr: clickhouse_async_insert_queue_size > 50
+        for: 10m
+        labels:
+          severity: warning
+          service: clickhouse
+        annotations:
+          summary: "ClickHouse async insert queue growing"
+          description: "Async insert queue size is above 50 for more than 10 minutes. Current size: {{ $value }}"
+          dashboard: "http://localhost:3001/d/clickhouse-overview"
+
+      - alert: DiskSpaceLow
+        expr: clickhouse_disk_available_default / clickhouse_disk_total_default < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          service: clickhouse
+        annotations:
+          summary: "ClickHouse disk space low"
+          description: "Available disk space below 10% (ratio: {{ $value | humanizePercentage }})."
+          dashboard: "http://localhost:3001/d/clickhouse-overview"
+
+      - alert: PartsExplosion
+        expr: max(clickhouse_table_parts_count{database!="system"}) > 200
+        for: 10m
+        labels:
+          severity: warning
+          service: clickhouse
+        annotations:
+          summary: "ClickHouse parts per table too high"
+          description: "At least one table has more than 200 active parts."
+          dashboard: "http://localhost:3001/d/clickhouse-overview"
+
+      - alert: ReplicaLagHigh
+        expr: clickhouse_replicas_max_absolute_delay > 30
+        for: 5m
+        labels:
+          severity: critical
+          service: clickhouse
+        annotations:
+          summary: "Replica lag detected"
+          description: "Replica absolute delay is above 30 seconds. Current delay: {{ $value }}s"
+          dashboard: "http://localhost:3001/d/clickhouse-overview"
+
+      - alert: MergesBacklog
+        expr: clickhouse_replicas_sum_merges_in_queue > 20
+        for: 10m
+        labels:
+          severity: warning
+          service: clickhouse
+        annotations:
+          summary: "ClickHouse merge queue backlog"
+          description: "Replica merge queue has over 20 items for 10 minutes. Current queue size: {{ $value }}"
+          dashboard: "http://localhost:3001/d/clickhouse-overview"
+
+      - alert: TooManyConnections
+        expr: clickhouse_tcp_connection > 200
+        for: 5m
+        labels:
+          severity: critical
+          service: clickhouse
+        annotations:
+          summary: "ClickHouse connections near limit"
+          description: "TCP connections exceed 200. Current value: {{ $value }}"
+          dashboard: "http://localhost:3001/d/clickhouse-overview"
+
+      - alert: MemoryLimitBreached
+        expr: clickhouse_memory_tracking > (clickhouse_os_memory_total * 0.9)
+        for: 5m
+        labels:
+          severity: critical
+          service: clickhouse
+        annotations:
+          summary: "ClickHouse memory usage critical"
+          description: "Tracked ClickHouse memory exceeds 90% of available system memory."
+          dashboard: "http://localhost:3001/d/clickhouse-overview"
+
+      - alert: CPUThrottling
+        expr: rate(process_cpu_seconds_total[5m]) > 3
+        for: 10m
+        labels:
+          severity: info
+          service: clickhouse
+        annotations:
+          summary: "ClickHouse high CPU consumption"
+          description: "CPU utilisation equivalent to >300% has persisted for 10 minutes."
+          dashboard: "http://localhost:3001/d/clickhouse-overview"
 
   # PostgreSQL Database Alerts
   - name: postgres_alerts

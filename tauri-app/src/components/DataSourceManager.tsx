@@ -7,6 +7,36 @@ interface Props {
   onSelectDataSource: (dsId: string) => void;
 }
 
+const getPlaceholderForEngine = (engine: string): string => {
+  switch (engine) {
+    case 'postgres':
+    case 'postgresql':
+    case 'pg':
+      return 'postgresql://user:password@localhost:5432/dbname';
+    case 'mysql':
+    case 'mariadb':
+      return 'mysql://user:password@localhost:3306/dbname';
+    case 'sqlserver':
+    case 'mssql':
+      return 'mssql://user:password@localhost:1433/dbname';
+    case 'oracle':
+      return 'oracle://user:password@localhost:1521/service_name';
+    case 'sqlite':
+      return 'sqlite:///path/to/database.db';
+    case 'clickhouse':
+      return 'clickhouse://user:password@localhost:8123/database';
+    case 'mongodb':
+    case 'mongo':
+      return 'mongodb://user:password@localhost:27017/dbname';
+    case 'redis':
+      return 'redis://localhost:6379/0';
+    case 'cassandra':
+      return 'cassandra://user:password@localhost:9042/keyspace';
+    default:
+      return 'database://user:password@host:port/dbname';
+  }
+};
+
 export function DataSourceManager({ onSelectDataSource }: Props) {
   const [dataSources, setDataSources] = useState<Record<string, DataSource>>({});
   const [loading, setLoading] = useState(true);
@@ -114,7 +144,19 @@ export function DataSourceManager({ onSelectDataSource }: Props) {
                 value={formData.engine}
                 onChange={(e) => setFormData({ ...formData, engine: e.target.value })}
               >
-                <option value="postgres">PostgreSQL</option>
+                <optgroup label="SQL Databases">
+                  <option value="postgres">PostgreSQL</option>
+                  <option value="mysql">MySQL / MariaDB</option>
+                  <option value="sqlserver">SQL Server</option>
+                  <option value="oracle">Oracle</option>
+                  <option value="sqlite">SQLite</option>
+                  <option value="clickhouse">ClickHouse</option>
+                </optgroup>
+                <optgroup label="NoSQL Databases">
+                  <option value="mongodb">MongoDB</option>
+                  <option value="redis">Redis</option>
+                  <option value="cassandra">Cassandra</option>
+                </optgroup>
               </select>
             </div>
             <div className="form-group">
@@ -123,7 +165,7 @@ export function DataSourceManager({ onSelectDataSource }: Props) {
                 type="text"
                 value={formData.dsn}
                 onChange={(e) => setFormData({ ...formData, dsn: e.target.value })}
-                placeholder="postgresql://user:password@localhost:5432/dbname"
+                placeholder={getPlaceholderForEngine(formData.engine)}
                 required
               />
             </div>

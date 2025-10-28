@@ -43,7 +43,7 @@ interface AlertsResponse {
 
 type TabType = 'current' | 'resolved' | 'all';
 
-const API_BASE = 'http://127.0.0.1:8000';
+const API_BASE = 'http://127.0.0.1:8095';
 
 // Severity badge colors
 const severityColors = {
@@ -263,6 +263,94 @@ export default function AlertsPanel() {
           <span style={{ fontSize: '12px', color: '#666' }}>
             <strong>Metric:</strong> {alert.metric_value} | <strong>Threshold:</strong> {alert.threshold}
           </span>
+        </div>
+      )}
+
+      {/* AI Analysis Section */}
+      {alert.metadata?.ai_analysis && !alert.metadata.ai_analysis.error && (
+        <div style={{
+          marginBottom: '12px',
+          padding: '12px',
+          backgroundColor: '#f0f9ff',
+          borderLeft: '4px solid #3b82f6',
+          borderRadius: '4px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <span style={{ fontSize: '16px' }}>🤖</span>
+            <strong style={{ fontSize: '13px', color: '#1e40af' }}>AI Analysis</strong>
+          </div>
+
+          {/* Root Cause */}
+          {alert.metadata.ai_analysis.root_cause && (
+            <div style={{ marginBottom: '10px' }}>
+              <div style={{ fontSize: '12px', fontWeight: '600', color: '#374151', marginBottom: '4px' }}>
+                Root Cause:
+              </div>
+              <div style={{ fontSize: '13px', color: '#4b5563', lineHeight: '1.5' }}>
+                {alert.metadata.ai_analysis.root_cause}
+              </div>
+            </div>
+          )}
+
+          {/* Risk Level */}
+          {alert.metadata.ai_analysis.risk_level && (
+            <div style={{ marginBottom: '10px' }}>
+              <span style={{ fontSize: '12px', fontWeight: '600', color: '#374151' }}>Risk Level: </span>
+              <span style={{
+                display: 'inline-block',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: 'bold',
+                color: '#fff',
+                backgroundColor: alert.metadata.ai_analysis.risk_level === 'high' ? '#dc2626' :
+                                alert.metadata.ai_analysis.risk_level === 'medium' ? '#f59e0b' : '#16a34a'
+              }}>
+                {alert.metadata.ai_analysis.risk_level.toUpperCase()}
+              </span>
+            </div>
+          )}
+
+          {/* Immediate Actions */}
+          {alert.metadata.ai_analysis.immediate_actions && alert.metadata.ai_analysis.immediate_actions.length > 0 && (
+            <div style={{ marginBottom: '10px' }}>
+              <div style={{ fontSize: '12px', fontWeight: '600', color: '#374151', marginBottom: '6px' }}>
+                ⚡ Immediate Actions:
+              </div>
+              <ul style={{ margin: '0', paddingLeft: '20px', fontSize: '13px', color: '#4b5563', lineHeight: '1.6' }}>
+                {alert.metadata.ai_analysis.immediate_actions.map((action: string, idx: number) => (
+                  <li key={idx}>{action}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Runbook Steps (Collapsible) */}
+          {alert.metadata.ai_analysis.runbook_steps && alert.metadata.ai_analysis.runbook_steps.length > 0 && (
+            <details style={{ marginTop: '8px' }}>
+              <summary style={{
+                fontSize: '12px',
+                fontWeight: '600',
+                color: '#374151',
+                cursor: 'pointer',
+                userSelect: 'none'
+              }}>
+                📋 Detailed Runbook Steps ({alert.metadata.ai_analysis.runbook_steps.length})
+              </summary>
+              <ol style={{ margin: '8px 0 0 0', paddingLeft: '20px', fontSize: '13px', color: '#4b5563', lineHeight: '1.6' }}>
+                {alert.metadata.ai_analysis.runbook_steps.map((step: string, idx: number) => (
+                  <li key={idx} style={{ marginBottom: '4px' }}>{step}</li>
+                ))}
+              </ol>
+            </details>
+          )}
+
+          {/* Estimated Impact */}
+          {alert.metadata.ai_analysis.estimated_impact && (
+            <div style={{ marginTop: '10px', fontSize: '12px', color: '#6b7280', fontStyle: 'italic' }}>
+              💡 Impact: {alert.metadata.ai_analysis.estimated_impact}
+            </div>
+          )}
         </div>
       )}
 
