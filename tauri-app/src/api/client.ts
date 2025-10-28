@@ -20,7 +20,7 @@ import type {
   ApplySuggestionsResponse,
 } from '../types/suggestions';
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = 'http://127.0.0.1:8095';
 
 // Helper function for API requests
 async function apiRequest<T>(

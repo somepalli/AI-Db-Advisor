@@ -1,0 +1,11 @@
+event_id,user_id,order_id,event_type,source,occurred_at,details
+4d5c5c1a-2a4b-4f80-8a01-a21b6bd19c01,101,5001,order_created,web,2024-07-01 10:15:00,"{""amount"":95.00,""currency"":""USD"",""channel"":""web""}"
+881de75d-77f7-49b1-9b6f-1ad4e03d6a22,101,5001,payment_captured,web,2024-07-01 10:16:12,"{""payment_method"":""card"",""status"":""captured""}"
+b502d4f5-5630-4a41-88e0-8fad0f37f317,104,5007,order_created,mobile,2024-07-02 08:02:45,"{""amount"":149.99,""currency"":""USD"",""channel"":""ios""}"
+92bb3fd0-96c4-44b6-ad0d-2c54a5f5e6b8,104,5007,order_shipped,warehouse,2024-07-02 14:44:11,"{""carrier"":""ups"",""priority"":""2-day""}"
+fac81f1f-0e92-4ca9-bb17-3bf9a06d17db,103,5005,order_created,web,2024-07-03 13:27:33,"{""amount"":59.50,""currency"":""USD"",""channel"":""web""}"
+ad727c3f-3f8e-4fe1-8f20-235fd7f781c6,103,5005,order_refunded,support,2024-07-04 09:18:07,"{""reason"":""damaged item"",""refund_amount"":59.50}"
+4d6b9a10-33d4-4d95-8fa3-1dd1beccbc83,106,5011,order_created,partner,2024-07-04 11:23:18,"{""amount"":215.00,""currency"":""USD"",""channel"":""reseller""}"
+f7db7288-e77f-4e94-a472-5cb3cf1a4f24,106,5011,order_shipped,warehouse,2024-07-05 07:01:55,"{""carrier"":""fedex"",""priority"":""overnight""}"
+9d3b1ff4-932b-4a59-8f16-37e9a8b68de0,109,5018,order_created,web,2024-07-05 15:10:02,"{""amount"":32.00,""currency"":""USD"",""channel"":""web""}"
+f1c0cb11-45b0-44b4-89fe-ecc2a4f0d60a,109,0,user_login,web,2024-07-05 15:12:47,"{""browser"":""chrome"",""session_length"":342}"

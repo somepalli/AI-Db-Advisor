@@ -52,7 +52,19 @@
       "Bash(timeout /t 3 /nobreak)",
       "Bash(git init:*)",
       "Bash(git add:*)",
-      "Bash(del nul)"
+      "Bash(del nul)",
+      "Bash(git commit:*)",
+      "Bash(gh auth status:*)",
+      "Bash(git remote add:*)",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(timeout /t 5 /nobreak)",
+      "Bash(cat:*)",
+      "Bash(timeout /t 30 /nobreak)",
+      "Bash(myenvScriptspython.exe test_alert_flow.py)",
+      "Bash(timeout /t 10 /nobreak)",
+      "Bash(taskkill:*)",
+      "Bash(myenv/Scripts/pip.exe install:*)"
     ],
     "deny": [],
     "ask": []

@@ -40,6 +40,7 @@ def list_supported_engines():
         "Redis": ["redis"],
         "SQLite": ["sqlite", "sqlite3"],
         "Cassandra": ["cassandra", "cassandra-db"],
+        "ClickHouse": ["clickhouse", "clickhouse+http", "clickhouse+https"],
     }
 
     return {
