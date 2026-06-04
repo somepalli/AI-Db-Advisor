@@ -40,6 +40,11 @@ def explain_cost(conn: Connection, sql: str) -> float:
     """
     with conn.cursor() as cur:
         # Bound the EXPLAIN with a statement timeout in a single round-trip.
+        # psycopg3 supports multiple statements in one execute() (no parameters here),
+        # and fetchone() returns the EXPLAIN result. We intentionally use session-level
+        # SET (not SET LOCAL) because explain_cost is also called outside a transaction
+        # (autocommit) by validate_rewrite; the validation connection is short-lived, so
+        # the timeout does not leak beyond this validation pass.
         cur.execute(
             f"SET statement_timeout = '{VALIDATION_STATEMENT_TIMEOUT}'; "
             f"EXPLAIN (FORMAT JSON) {sql}"
@@ -98,19 +103,28 @@ def validate_index_in_tx(
             cur.execute(f"SET LOCAL statement_timeout = '{VALIDATION_STATEMENT_TIMEOUT}'")
             cur.execute(f"SET LOCAL lock_timeout = '{VALIDATION_LOCK_TIMEOUT}'")
 
-            # Baseline EXPLAIN — also gives us the estimated row count for a safety check.
-            cur.execute(f"EXPLAIN (FORMAT JSON) {target_sql}")
-            baseline_plan = _plan_from_row(cur.fetchone())
-            result["cost_before"] = float(baseline_plan.get("Total Cost", 0))
-
-            plan_rows = baseline_plan.get("Plan Rows", 0)
-            if plan_rows > MAX_TABLE_ROWS_FOR_VALIDATION:
+            # Safety check on the ACTUAL table size (estimated via pg_class.reltuples —
+            # cheap, no COUNT(*)). Guarding on the query's estimated result rows is wrong:
+            # a selective query on a huge table would still build the index over the whole
+            # table. Skip validation on very large tables regardless of query selectivity.
+            cur.execute(
+                "SELECT COALESCE(reltuples, 0)::bigint FROM pg_class WHERE oid = to_regclass(%s)",
+                (table_name,),
+            )
+            size_row = cur.fetchone()
+            est_rows = int(size_row[0]) if size_row and size_row[0] is not None else 0
+            if est_rows > MAX_TABLE_ROWS_FOR_VALIDATION:
                 cur.execute("ROLLBACK")
                 result["note"] = (
-                    f"Skipped: too many rows ({plan_rows:,} > "
+                    f"Skipped: too many rows ({est_rows:,} > "
                     f"{MAX_TABLE_ROWS_FOR_VALIDATION:,})"
                 )
                 return result
+
+            # Baseline EXPLAIN (cost without the index).
+            cur.execute(f"EXPLAIN (FORMAT JSON) {target_sql}")
+            baseline_plan = _plan_from_row(cur.fetchone())
+            result["cost_before"] = float(baseline_plan.get("Total Cost", 0))
 
             # Create the index inside the transaction, then re-plan.
             logger.info(f"Creating index in transaction: {create_index_sql}")

@@ -109,27 +109,26 @@ export function OptimizerConsole({ dsId }: Props) {
         dry_run: dryRun,
       });
 
-      // If the server couldn't resolve some IDs (e.g. the TTL store expired),
-      // fall back to apply_direct for just those, sending the full objects.
-      const missingIds = response.results
-        .filter(
-          (r) =>
-            r.status === 'skipped' && /not found|expired|not yet implemented/i.test(r.message)
-        )
-        .map((r) => r.id);
-
-      if (missingIds.length > 0) {
-        const fallbackSuggestions = suggestions.filter((s) => missingIds.includes(s.id));
-        if (fallbackSuggestions.length > 0) {
-          const fallback = await suggestionsApi.applyDirect({
-            ds_id: dsId,
-            suggestions: fallbackSuggestions,
-            dry_run: dryRun,
-          });
-          // Merge fallback results over the skipped placeholders.
-          const fallbackById = new Map(fallback.results.map((r) => [r.id, r]));
-          response.results = response.results.map((r) => fallbackById.get(r.id) ?? r);
-        }
+      // Any result the store couldn't apply comes back "skipped" — this covers
+      // expired/unknown IDs as well as guardrail blocks. Retry every skipped id we
+      // still hold the full object for via apply_direct; the backend re-runs the same
+      // guardrails, so genuinely-unsafe suggestions remain skipped, while ones skipped
+      // only because the TTL store expired now get applied. (No coupling to message text.)
+      const skippedIds = new Set(
+        response.results.filter((r) => r.status === 'skipped').map((r) => r.id)
+      );
+      const fallbackSuggestions = suggestions.filter((s) => skippedIds.has(s.id));
+      if (fallbackSuggestions.length > 0) {
+        const fallback = await suggestionsApi.applyDirect({
+          ds_id: dsId,
+          suggestions: fallbackSuggestions,
+          dry_run: dryRun,
+        });
+        // Merge fallback results over the skipped placeholders.
+        const fallbackById = new Map(fallback.results.map((r) => [r.id, r]));
+        response.results = response.results.map((r) =>
+          r.status === 'skipped' ? fallbackById.get(r.id) ?? r : r
+        );
       }
 
       // Add to history
