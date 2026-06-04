@@ -10,9 +10,19 @@ class LLMClient:
         self.model = model or settings.LLM_MODEL
         self.endpoint = (endpoint or settings.LLM_ENDPOINT).rstrip("/")
 
-    def chat(self, messages: List[Dict[str, str]], json_response: bool = False, temperature: float = 0.2, max_tokens: int = 1500) -> str:
+    def chat(self, messages: List[Dict[str, str]], json_response: bool = False, temperature: float = 0.2, max_tokens: int = 1500, stream: bool = False) -> str:
         """
         Currently supports Ollama's /api/chat.
+
+        Args:
+            messages: List of chat messages
+            json_response: Enable JSON mode
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate
+            stream: Enable streaming mode (returns generator if True)
+
+        Returns:
+            Complete response text (if stream=False) or generator (if stream=True)
         """
         if self.provider != "ollama":
             raise RuntimeError(f"Unsupported LLM provider: {self.provider}")
@@ -20,7 +30,7 @@ class LLMClient:
         payload = {
             "model": self.model,
             "messages": messages,
-            "stream": False,
+            "stream": stream,
             "options": {"temperature": temperature, "num_predict": max_tokens},
         }
 
@@ -29,6 +39,12 @@ class LLMClient:
             payload["format"] = "json"
 
         url = f"{self.endpoint}/api/chat"
+
+        if stream:
+            # Return a generator for streaming mode
+            return self._stream_chat(url, payload)
+
+        # Non-streaming mode (original behavior)
         try:
             with httpx.Client(timeout=60) as client:
                 resp = client.post(url, json=payload)
@@ -81,3 +97,43 @@ class LLMClient:
             return text
         except httpx.RequestError as e:
             raise ConnectionError(f"LLM unreachable at {url}: {e}") from e
+
+    def _stream_chat(self, url: str, payload: dict):
+        """
+        Generator function for streaming chat responses.
+
+        Yields:
+            Text chunks as they arrive from the LLM
+        """
+        import json
+        import logging
+        logger = logging.getLogger(__name__)
+
+        try:
+            with httpx.Client(timeout=120) as client:
+                with client.stream("POST", url, json=payload) as response:
+                    response.raise_for_status()
+
+                    for line in response.iter_lines():
+                        if line.strip():
+                            try:
+                                # Parse JSON from each line
+                                chunk = json.loads(line)
+
+                                # Extract the content delta
+                                if "message" in chunk:
+                                    content = chunk["message"].get("content", "")
+                                    if content:
+                                        yield content
+
+                                # Check if done
+                                if chunk.get("done", False):
+                                    break
+
+                            except json.JSONDecodeError:
+                                logger.warning(f"Failed to parse streaming chunk: {line}")
+                                continue
+
+        except httpx.RequestError as e:
+            logger.error(f"Streaming request failed: {e}")
+            raise ConnectionError(f"LLM streaming failed at {url}: {e}") from e

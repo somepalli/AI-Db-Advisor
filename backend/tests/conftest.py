@@ -11,8 +11,8 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from app.main import app
-from app.config import settings
+from backend.main import app
+from backend.config import settings
 
 
 @pytest.fixture(scope="function")

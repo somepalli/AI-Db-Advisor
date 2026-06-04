@@ -3,15 +3,18 @@ AI Chat Router - Conversational SQL Assistant
 Provides intelligent query generation, optimization, and table creation assistance.
 """
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import logging
 import json
 import re
+import asyncio
 from ..deps import resolve_agent
 from ..services.ai_client import LLMClient
 from ..services import chat_history
 from ..services.context_builder import build_ai_context
+from ..services.mcp_client import get_mcp_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai-chat", tags=["ai-chat"])
@@ -219,10 +222,21 @@ Wrong SQL: SELECT * FROM enrollments WHERE semester LIKE '%2020%' (if 'semester'
                         logger.warning(f"Failed to save chat history: {e}")
                         # Don't fail the request if history save fails
 
+                # Fetch MCP suggestions asynchronously (if available)
+                mcp_suggestions = await _fetch_mcp_suggestions(body.ds_id, sql or body.current_sql)
+
+                # Merge AI and MCP suggestions
+                all_suggestions = suggestions + mcp_suggestions
+
+                # Add context about MCP suggestions if any were fetched
+                if mcp_suggestions:
+                    context["mcp_suggestions_count"] = len(mcp_suggestions)
+                    context["total_suggestions"] = len(all_suggestions)
+
                 return ChatResponse(
                     message=message,
                     sql=sql,
-                    suggestions=suggestions,
+                    suggestions=all_suggestions,
                     action=action,
                     context=context
                 )
@@ -456,3 +470,68 @@ def _suggest_table_creation(table_name: str, sql_context: str, db_type: str) -> 
 );"""
 
     return create_sql
+
+
+async def _fetch_mcp_suggestions(ds_id: str, sql: Optional[str]) -> List[Dict[str, Any]]:
+    """
+    Fetch MCP suggestions asynchronously using direct postgres-mcp integration.
+    Falls back gracefully if MCP is not available.
+    """
+    try:
+        # Get datasource to check if it's PostgreSQL
+        agent = resolve_agent(ds_id)
+        db_type = agent.get_db_type().upper()
+
+        # Only use postgres-mcp for PostgreSQL databases
+        if db_type != "POSTGRES":
+            logger.info(f"Skipping postgres-mcp for non-PostgreSQL database: {db_type}")
+            return []
+
+        # Get DSN from agent
+        from ..config import settings
+        ds_config = settings.DATASOURCES.get(ds_id)
+        if not ds_config:
+            logger.warning(f"Datasource config not found: {ds_id}")
+            return []
+
+        dsn = ds_config.get("dsn")
+        if not dsn:
+            logger.warning(f"DSN not found for datasource: {ds_id}")
+            return []
+
+        # Use direct postgres-mcp integration
+        logger.info(f"Fetching postgres-mcp suggestions for {ds_id}")
+
+        from ..services.postgres_mcp_direct import get_optimization_suggestions
+
+        # Get optimization suggestions
+        mcp_suggestions_raw = await get_optimization_suggestions(
+            dsn=dsn,
+            query=sql,
+            max_suggestions=5
+        )
+
+        # Convert to AI suggestion format
+        ai_format_suggestions = []
+        for mcp_sug in mcp_suggestions_raw:
+            ai_format_suggestions.append({
+                "type": mcp_sug.get("type", "optimization"),
+                "summary": mcp_sug.get("description", ""),
+                "sql": mcp_sug.get("sql", ""),
+                "rationale": mcp_sug.get("rationale", ""),
+                "risk": mcp_sug.get("risk_level", "low"),
+                "mcp_tool": mcp_sug.get("mcp_tool", ""),
+                "expected_gain": mcp_sug.get("expected_gain", "Performance improvement expected"),
+                "is_mcp": True,  # Flag to identify MCP suggestions
+                "category": mcp_sug.get("category", "optimization"),
+                "tables_affected": mcp_sug.get("tables_affected", []),
+                "columns": mcp_sug.get("columns", [])
+            })
+
+        logger.info(f"Generated {len(ai_format_suggestions)} postgres-mcp suggestions")
+        return ai_format_suggestions
+
+    except Exception as e:
+        logger.warning(f"Failed to fetch postgres-mcp suggestions: {e}", exc_info=True)
+        # Don't fail the request if MCP fails
+        return []

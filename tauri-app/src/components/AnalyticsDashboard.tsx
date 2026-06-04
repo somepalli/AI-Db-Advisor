@@ -70,7 +70,7 @@ export function AnalyticsDashboard({ pgDataSourceId, chDataSourceId }: Props) {
     try {
       const status = await analyticsApi.getSyncStatus({
         pg_ds_id: pgDataSourceId,
-        ch_ds_id: chDataSourceId,
+        duckdb_ds_id: chDataSourceId,
       });
       setSyncStatus(status);
     } catch (err: any) {
@@ -89,7 +89,7 @@ export function AnalyticsDashboard({ pgDataSourceId, chDataSourceId }: Props) {
     try {
       const result = await analyticsApi.syncAllTables({
         pg_ds_id: pgDataSourceId,
-        ch_ds_id: chDataSourceId,
+        duckdb_ds_id: chDataSourceId,
         batch_size: 1000,
       });
 
@@ -281,7 +281,7 @@ export function AnalyticsDashboard({ pgDataSourceId, chDataSourceId }: Props) {
                   cx="50%"
                   cy="50%"
                   outerRadius={100}
-                  label={(entry) => entry.department_name}
+                  label={(entry: any) => entry.department_name}
                 >
                   {departmentDist.rows.slice(0, 8).map((_entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -465,7 +465,7 @@ export function AnalyticsDashboard({ pgDataSourceId, chDataSourceId }: Props) {
                     >
                       <span style={{ fontWeight: 500 }}>{stat.table}</span>
                       <span style={{ color: 'hsl(var(--muted-foreground))' }}>
-                        PG: {stat.pg_rows.toLocaleString()} | DuckDB: {stat.ch_rows.toLocaleString()}
+                        PG: {stat.pg_rows.toLocaleString()} | DuckDB: {stat.duckdb_rows.toLocaleString()}
                         {stat.in_sync ? ' ✅' : ' ⚠️'}
                       </span>
                     </div>

@@ -211,3 +211,31 @@ class PostgresAgent(BaseAgent):
 
         logger.debug(f"✗ No matching index found on {table_name}({', '.join(columns_normalized)})")
         return False
+
+    def execute_query(self, sql: str) -> Dict[str, Any]:
+        """Execute a query and return results (for data sync and analytics)"""
+        try:
+            with self._conn() as c, c.cursor() as cur:
+                cur.execute(sql)
+
+                # Check if there are results to fetch
+                if cur.description:
+                    rows = cur.fetchall()
+                    return {
+                        "success": True,
+                        "rows": rows,
+                        "row_count": len(rows)
+                    }
+                else:
+                    # For queries that don't return rows (INSERT, UPDATE, etc.)
+                    return {
+                        "success": True,
+                        "rows": [],
+                        "row_count": cur.rowcount
+                    }
+        except Exception as e:
+            logger.error(f"PostgreSQL execute error: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }

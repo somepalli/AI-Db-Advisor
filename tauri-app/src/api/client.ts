@@ -20,7 +20,12 @@ import type {
   ApplySuggestionsResponse,
 } from '../types/suggestions';
 
-const API_BASE_URL = 'http://127.0.0.1:8095';
+// Re-export commonly used types so consumers can import them from the client.
+export type { DataSource } from '../types';
+
+// Base URL for the backend API. Override at build/run time with VITE_API_BASE_URL.
+export const API_BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) || 'http://127.0.0.1:8095';
 
 // Helper function for API requests
 async function apiRequest<T>(
@@ -144,6 +149,7 @@ export const analyzeApi = {
     rows: Record<string, any>[];
     row_count: number;
     status: string;
+    error?: { type: string; message: string; details?: string };
   }> => {
     return apiRequest(`/analyze/${dsId}/execute`, {
       method: 'POST',
@@ -465,6 +471,8 @@ export interface MCPSuggestionResponse {
   datasource_id: string;
   requested_at: string;
   note: string;
+  /** True when MCP is not configured and the suggestions are illustrative samples. */
+  demo_mode?: boolean;
 }
 
 export interface ApprovalRequest {
@@ -569,10 +577,10 @@ export const mcpApi = {
   },
 };
 
-// Analytics API (ClickHouse)
+// Analytics API (DuckDB)
 export interface SyncTableRequest {
   pg_ds_id: string;
-  ch_ds_id: string;
+  duckdb_ds_id: string;
   table_name: string;
   batch_size?: number;
   incremental?: boolean;
@@ -581,14 +589,14 @@ export interface SyncTableRequest {
 
 export interface SyncAllTablesRequest {
   pg_ds_id: string;
-  ch_ds_id: string;
+  duckdb_ds_id: string;
   exclude_tables?: string[];
   batch_size?: number;
 }
 
 export interface SyncStatusRequest {
   pg_ds_id: string;
-  ch_ds_id: string;
+  duckdb_ds_id: string;
 }
 
 export interface AnalyticsQueryRequest {
@@ -613,7 +621,7 @@ export interface SyncStatus {
   table_stats: Array<{
     table: string;
     pg_rows: number;
-    ch_rows: number;
+    duckdb_rows: number;
     in_sync: boolean;
   }>;
 }
@@ -624,6 +632,62 @@ export interface AnalyticsResult {
   row_count: number;
   error?: string;
 }
+
+// Alerts API
+export interface AlertResponse {
+  id: string;
+  rule_id: string;
+  severity: string;
+  title: string;
+  message: string;
+  datasource_id: string;
+  datasource_engine: string;
+  triggered_at: string;
+  status: string;
+  metric_value?: any;
+  threshold?: any;
+  metadata?: Record<string, any>;
+  acknowledged_at?: string;
+  acknowledged_by?: string;
+  resolved_at?: string;
+  auto_resolved: boolean;
+  resolution_type?: string | null;
+}
+
+export interface AlertListResponse {
+  alerts: AlertResponse[];
+  count: number;
+  summary?: Record<string, number>;
+}
+
+export const alertsApi = {
+  getActive: async (): Promise<AlertListResponse> => {
+    return apiRequest<AlertListResponse>('/alerts/active');
+  },
+  getResolved: async (limit = 50): Promise<AlertListResponse> => {
+    return apiRequest<AlertListResponse>(`/alerts/resolved?limit=${limit}`);
+  },
+  getAll: async (limit = 100): Promise<AlertListResponse> => {
+    return apiRequest<AlertListResponse>(`/alerts/all?limit=${limit}`);
+  },
+  acknowledge: async (id: string, payload: { acknowledged_by: string; notes?: string }): Promise<AlertResponse> => {
+    return apiRequest<AlertResponse>(`/alerts/${encodeURIComponent(id)}/acknowledge`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  resolve: async (id: string, payload: { resolved_by?: string; notes?: string }): Promise<AlertResponse> => {
+    return apiRequest<AlertResponse>(`/alerts/${encodeURIComponent(id)}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  analyze: async (id: string): Promise<any> => {
+    return apiRequest<any>(`/alerts/${encodeURIComponent(id)}/analyze`, {
+      method: 'POST',
+    });
+  },
+};
 
 export const analyticsApi = {
   // Data sync endpoints

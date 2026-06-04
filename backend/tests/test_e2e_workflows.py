@@ -10,7 +10,7 @@ from unittest.mock import patch
 class TestEndToEndWorkflows:
     """Test complete user workflows from start to finish"""
 
-    @patch('app.deps.get_agent_for')
+    @patch('backend.deps.get_agent_for')
     def test_complete_workflow_new_user(self, mock_get_agent, client, sample_datasource, mock_postgres_agent, sample_sql):
         """
         Test complete workflow for a new user:
@@ -76,7 +76,7 @@ class TestEndToEndWorkflows:
         recommendations = response.json()
         assert len(recommendations) > 0
 
-    @patch('app.deps.get_agent_for')
+    @patch('backend.deps.get_agent_for')
     def test_ui_workflow_dashboard_to_recommendations(self, mock_get_agent, client, sample_datasource, mock_postgres_agent, sample_sql):
         """
         Test UI workflow:
@@ -124,8 +124,8 @@ class TestEndToEndWorkflows:
         response = client.get(f"/ui/pages/advise?ds_id={ds_id}&sql={sample_sql['select_star']}&ai=0")
         assert response.status_code == status.HTTP_200_OK
 
-    @patch('app.deps.get_agent_for')
-    @patch('app.services.ai_client.LLMClient')
+    @patch('backend.deps.get_agent_for')
+    @patch('backend.services.ai_client.LLMClient')
     def test_workflow_with_ai_recommendations(self, mock_llm_class, mock_get_agent, client, sample_datasource, mock_postgres_agent, sample_sql, mock_llm_client):
         """
         Test workflow with AI-powered recommendations:
@@ -153,7 +153,7 @@ class TestEndToEndWorkflows:
         data = response.json()
         assert "explanation" in data
 
-    @patch('app.deps.get_agent_for')
+    @patch('backend.deps.get_agent_for')
     def test_workflow_multiple_datasources(self, mock_get_agent, client, mock_postgres_agent):
         """
         Test workflow with multiple datasources:
@@ -188,7 +188,7 @@ class TestEndToEndWorkflows:
             response = client.get(f"/ui/pages/ds/{ds['id']}")
             assert response.status_code == status.HTTP_200_OK
 
-    @patch('app.deps.get_agent_for')
+    @patch('backend.deps.get_agent_for')
     def test_workflow_query_optimization_cycle(self, mock_get_agent, client, sample_datasource, mock_postgres_agent, sample_sql):
         """
         Test query optimization workflow:
@@ -252,7 +252,7 @@ class TestEndToEndWorkflows:
         response = client.post("/datasources", json=incomplete)
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
-    @patch('app.deps.get_agent_for')
+    @patch('backend.deps.get_agent_for')
     def test_workflow_performance_monitoring(self, mock_get_agent, client, sample_datasource, mock_postgres_agent):
         """
         Test performance monitoring workflow:

@@ -4,7 +4,7 @@ Tests for validation services (transactional validation)
 """
 import pytest
 from unittest.mock import MagicMock, patch
-from app.services.validate import (
+from backend.services.validate import (
     explain_cost,
     validate_index_in_tx,
     validate_rewrite,

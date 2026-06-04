@@ -21,7 +21,7 @@ interface Props {
  * - Syntax highlighting for code
  * - Preserves text formatting outside code blocks
  */
-export function MessageRenderer({ content, role }: Props) {
+export function MessageRenderer({ content }: Props) {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   const parseCodeBlocks = (text: string): (string | CodeBlock)[] => {

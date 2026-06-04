@@ -9,8 +9,8 @@
  * - Context-aware intelligence
  */
 import { useState, useEffect, useRef } from 'react';
-import { analyzeApi, aiChatApi, chatHistoryApi, type ChatMessage, type ChatResponse, type HistoryMessage, suggestionsApi, mcpApi, type MCPSuggestion } from '../api/client';
-import type { SchemaResponse, Recommendation } from '../types';
+import { analyzeApi, aiChatApi, chatHistoryApi, type HistoryMessage, suggestionsApi, mcpApi, type MCPSuggestion } from '../api/client';
+import type { SchemaResponse } from '../types';
 import type { Suggestion } from '../types/suggestions';
 import { ChatHistoryDropdown } from './ChatHistoryDropdown';
 import { MessageRenderer } from './MessageRenderer';
@@ -45,7 +45,6 @@ export function SQLAssistant({ dataSourceId }: Props) {
 
   // Suggestions State
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
 
   // MCP State (integrated with AI chat)
@@ -264,7 +263,7 @@ export function SQLAssistant({ dataSourceId }: Props) {
   const applySuggestion = (suggestion: Suggestion) => {
     if (suggestion.sql_fix) {
       // If it's a CREATE TABLE, append to SQL
-      if (suggestion.category === 'schema' || suggestion.sql_fix.toUpperCase().includes('CREATE TABLE')) {
+      if (suggestion.sql_fix.toUpperCase().includes('CREATE TABLE')) {
         setSql(prev => prev ? `${prev}\n\n${suggestion.sql_fix}` : suggestion.sql_fix!);
       } else if (suggestion.category === 'index') {
         // Append index creation
@@ -982,7 +981,6 @@ export function SQLAssistant({ dataSourceId }: Props) {
                         borderLeft: `3px solid ${
                           suggestion.category === 'index' ? '#8b5cf6' :
                           suggestion.category === 'rewrite' ? '#f59e0b' :
-                          suggestion.category === 'schema' ? '#10b981' :
                           'var(--primary)'
                         }`,
                       }}

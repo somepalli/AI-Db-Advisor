@@ -11,6 +11,7 @@ from .oracle_agent import OracleAgent
 from .redis_agent import RedisAgent
 from .sqlite_agent import SQLiteAgent
 from .cassandra_agent import CassandraAgent
+from .duckdb_agent import DuckDBAgent
 from .clickhouse_agent import ClickHouseAgent
 
 # Supported database engines
@@ -47,6 +48,9 @@ SUPPORTED_ENGINES = {
     # Cassandra
     "cassandra": CassandraAgent,
     "cassandra-db": CassandraAgent,
+
+    # DuckDB
+    "duckdb": DuckDBAgent,
 
     # ClickHouse
     "clickhouse": ClickHouseAgent,

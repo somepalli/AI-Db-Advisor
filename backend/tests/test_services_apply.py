@@ -4,13 +4,13 @@ Tests for apply services (suggestion application)
 """
 import pytest
 from unittest.mock import MagicMock, patch
-from app.services.apply import (
+from backend.services.apply import (
     generate_rollback_sql,
     apply_suggestions,
     apply_suggestion_batch,
     _apply_single_suggestion
 )
-from app.schemas import Suggestion, ApplyResult
+from backend.schemas import Suggestion, ApplyResult
 
 
 class TestApplyServices:
@@ -184,7 +184,7 @@ class TestApplyServices:
         rollback = generate_rollback_sql(suggestion)
         assert rollback is None
 
-    @patch('app.services.apply.validate_suggestion_for_apply')
+    @patch('backend.services.apply.validate_suggestion_for_apply')
     def test_apply_suggestions_dry_run_success(self, mock_validate, mock_connection, sample_suggestions):
         """Test applying suggestions in dry-run mode"""
         conn, cursor = mock_connection
@@ -202,7 +202,7 @@ class TestApplyServices:
         assert "BEGIN" in calls
         assert "ROLLBACK" in calls
 
-    @patch('app.services.apply.validate_suggestion_for_apply')
+    @patch('backend.services.apply.validate_suggestion_for_apply')
     def test_apply_suggestions_real_execution(self, mock_validate, mock_connection, sample_suggestions):
         """Test applying suggestions with real execution"""
         conn, cursor = mock_connection
@@ -220,7 +220,7 @@ class TestApplyServices:
         assert "COMMIT" in calls
         assert sample_suggestions[0].sql_fix in calls
 
-    @patch('app.services.apply.validate_suggestion_for_apply')
+    @patch('backend.services.apply.validate_suggestion_for_apply')
     def test_apply_suggestions_skipped(self, mock_validate, mock_connection, sample_suggestions):
         """Test applying suggestion that should be skipped"""
         conn, cursor = mock_connection
@@ -233,7 +233,7 @@ class TestApplyServices:
         assert "High-risk operation" in results[0].message
         assert results[0].rollback_sql is None
 
-    @patch('app.services.apply.validate_suggestion_for_apply')
+    @patch('backend.services.apply.validate_suggestion_for_apply')
     def test_apply_suggestions_no_sql_fix(self, mock_validate, mock_connection):
         """Test applying suggestion with no SQL (note)"""
         conn, cursor = mock_connection
@@ -259,7 +259,7 @@ class TestApplyServices:
         assert results[0].status == "skipped"
         assert "No SQL to execute" in results[0].message
 
-    @patch('app.services.apply.validate_suggestion_for_apply')
+    @patch('backend.services.apply.validate_suggestion_for_apply')
     def test_apply_suggestions_execution_error(self, mock_validate, mock_connection, sample_suggestions):
         """Test applying suggestion with execution error"""
         conn, cursor = mock_connection
@@ -280,7 +280,7 @@ class TestApplyServices:
         assert "Execution failed" in results[0].message
         assert "does not exist" in results[0].message
 
-    @patch('app.services.apply.validate_suggestion_for_apply')
+    @patch('backend.services.apply.validate_suggestion_for_apply')
     def test_apply_suggestions_timeout_error(self, mock_validate, mock_connection, sample_suggestions):
         """Test applying suggestion with timeout error"""
         conn, cursor = mock_connection
@@ -299,7 +299,7 @@ class TestApplyServices:
         assert results[0].status == "error"
         assert "timeout" in results[0].message.lower()
 
-    @patch('app.services.apply.validate_suggestion_for_apply')
+    @patch('backend.services.apply.validate_suggestion_for_apply')
     def test_apply_suggestions_batch(self, mock_validate, mock_connection, sample_suggestions):
         """Test applying multiple suggestions"""
         conn, cursor = mock_connection
@@ -310,7 +310,7 @@ class TestApplyServices:
         assert len(results) == 3
         assert all(r.status == "success" for r in results)
 
-    @patch('app.services.apply.validate_suggestion_for_apply')
+    @patch('backend.services.apply.validate_suggestion_for_apply')
     def test_apply_suggestions_batch_mixed_results(self, mock_validate, mock_connection, sample_suggestions):
         """Test batch application with mixed success/failure"""
         conn, cursor = mock_connection
@@ -329,7 +329,7 @@ class TestApplyServices:
         assert results[1].status == "skipped"
         assert results[2].status == "success"
 
-    @patch('app.services.apply.validate_suggestion_for_apply')
+    @patch('backend.services.apply.validate_suggestion_for_apply')
     def test_apply_suggestion_batch_stop_on_error(self, mock_validate, mock_connection, sample_suggestions):
         """Test batch application that stops on first error"""
         conn, cursor = mock_connection
@@ -355,7 +355,7 @@ class TestApplyServices:
         assert results[2].status == "skipped"
         assert "previous error" in results[2].message
 
-    @patch('app.services.apply.validate_suggestion_for_apply')
+    @patch('backend.services.apply.validate_suggestion_for_apply')
     def test_apply_suggestion_batch_continue_on_error(self, mock_validate, mock_connection, sample_suggestions):
         """Test batch application that continues despite errors"""
         conn, cursor = mock_connection
@@ -383,7 +383,7 @@ class TestApplyServices:
         assert results[1].status == "error"
         # Third may succeed or fail depending on mock setup, but should be processed
 
-    @patch('app.services.apply.validate_suggestion_for_apply')
+    @patch('backend.services.apply.validate_suggestion_for_apply')
     def test_apply_suggestions_with_timeouts(self, mock_validate, mock_connection, sample_suggestions):
         """Test that appropriate timeouts are set during application"""
         conn, cursor = mock_connection
@@ -399,7 +399,7 @@ class TestApplyServices:
         # Dry-run should have shorter timeouts
         assert any("30s" in call for call in calls)  # statement_timeout for dry-run
 
-    @patch('app.services.apply.validate_suggestion_for_apply')
+    @patch('backend.services.apply.validate_suggestion_for_apply')
     def test_apply_suggestions_rollback_generation(self, mock_validate, mock_connection):
         """Test that rollback SQL is properly generated for applicable suggestions"""
         conn, cursor = mock_connection
@@ -424,7 +424,7 @@ class TestApplyServices:
         assert len(results) == 1
         assert results[0].rollback_sql == "DROP INDEX IF EXISTS idx_test;"
 
-    @patch('app.services.apply.validate_suggestion_for_apply')
+    @patch('backend.services.apply.validate_suggestion_for_apply')
     def test_apply_suggestions_ensures_rollback_on_error(self, mock_validate, mock_connection, sample_suggestions):
         """Test that transaction is rolled back even if execution fails"""
         conn, cursor = mock_connection

@@ -36,6 +36,7 @@ export function MCPSuggestionsPanel({ dataSourceId, currentQuery }: Props) {
   const [suggestions, setSuggestions] = useState<MCPSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
   const [selectedSuggestion, setSelectedSuggestion] = useState<MCPSuggestion | null>(null);
   const [showApprovalDialog, setShowApprovalDialog] = useState(false);
   const [showExecutionDialog, setShowExecutionDialog] = useState(false);
@@ -55,9 +56,10 @@ export function MCPSuggestionsPanel({ dataSourceId, currentQuery }: Props) {
       const response = await mcpApi.requestSuggestions(dataSourceId, request);
 
       setSuggestions(response.suggestions);
+      setDemoMode(Boolean(response.demo_mode));
       setError(null);
 
-      console.log(`Received ${response.count} MCP suggestions`);
+      console.log(`Received ${response.count} MCP suggestions${response.demo_mode ? ' (demo mode)' : ''}`);
     } catch (err: any) {
       setError(err.message || 'Failed to request MCP suggestions');
       console.error('MCP request error:', err);
@@ -209,6 +211,25 @@ export function MCPSuggestionsPanel({ dataSourceId, currentQuery }: Props) {
           }}
         >
           ⚠️ {error}
+        </div>
+      )}
+
+      {/* Demo-mode banner: MCP not configured */}
+      {demoMode && suggestions.length > 0 && (
+        <div
+          style={{
+            padding: '12px',
+            marginBottom: '16px',
+            backgroundColor: '#fef3c7',
+            color: '#92400e',
+            border: '1px solid #fde68a',
+            borderRadius: '6px',
+            fontSize: '13px',
+          }}
+        >
+          🧪 <strong>Demo mode</strong> — MCP is not configured, so these are illustrative
+          sample suggestions. Set <code>MCP_ENABLED=true</code> and configure the MCP bridge
+          (PostgreSQL only) to get real recommendations. See <code>MCP_SETUP_GUIDE.md</code>.
         </div>
       )}
 
@@ -540,7 +561,6 @@ function SuggestionCard({
 
 // Approval Dialog Component
 function ApprovalDialog({
-  suggestion,
   onConfirm,
   onCancel,
 }: {
