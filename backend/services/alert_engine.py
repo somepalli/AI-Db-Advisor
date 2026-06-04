@@ -553,11 +553,14 @@ class AlertEngine:
             if not rule or not rule.auto_resolve:
                 continue
 
-            # Check if all conditions are now false
+            # Only auto-resolve when the data positively confirms every condition has
+            # cleared. A missing metric is treated as "unknown" (not clear) so we don't
+            # silently resolve an alert — especially an acknowledged, human-owned one —
+            # on absent or transient data.
             all_clear = True
             for condition in rule.conditions:
                 value = metrics.get(condition.metric)
-                if value is not None and condition.evaluate(value):
+                if value is None or condition.evaluate(value):
                     all_clear = False
                     break
 

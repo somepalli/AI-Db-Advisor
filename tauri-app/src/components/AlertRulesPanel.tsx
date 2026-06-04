@@ -91,6 +91,21 @@ export function AlertRulesPanel({ dataSourceId }: Props) {
     }));
   };
 
+  const addCondition = () => {
+    setDraft((d) => ({
+      ...d,
+      conditions: [...d.conditions, { metric: '', operator: '>', threshold: 0, duration_minutes: 0 }],
+    }));
+  };
+
+  const removeCondition = (idx: number) => {
+    setDraft((d) => ({
+      ...d,
+      // Keep at least one condition.
+      conditions: d.conditions.length > 1 ? d.conditions.filter((_, i) => i !== idx) : d.conditions,
+    }));
+  };
+
   const monitoring = async (action: 'start' | 'stop') => {
     if (!dataSourceId) {
       setError('Select a datasource first to control monitoring.');
@@ -142,24 +157,46 @@ export function AlertRulesPanel({ dataSourceId }: Props) {
           <Field label="Description">
             <input value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} style={inputStyle} />
           </Field>
-          <Field label="Condition">
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <input
-                placeholder="metric (e.g. cpu_percent)"
-                value={draft.conditions[0].metric}
-                onChange={(e) => updateCondition(0, { metric: e.target.value })}
-                style={{ ...inputStyle, flex: 2 }}
-              />
-              <select value={draft.conditions[0].operator} onChange={(e) => updateCondition(0, { operator: e.target.value })} style={{ ...inputStyle, flex: 1 }}>
-                {OPERATORS.map((o) => <option key={o} value={o}>{o}</option>)}
-              </select>
-              <input
-                type="number"
-                value={draft.conditions[0].threshold}
-                onChange={(e) => updateCondition(0, { threshold: Number(e.target.value) })}
-                style={{ ...inputStyle, flex: 1 }}
-              />
-            </div>
+          <Field label="Conditions (all must hold)">
+            {draft.conditions.map((cond, idx) => (
+              <div key={idx} style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                <input
+                  placeholder="metric (e.g. cpu_percent)"
+                  value={cond.metric}
+                  onChange={(e) => updateCondition(idx, { metric: e.target.value })}
+                  style={{ ...inputStyle, flex: 2 }}
+                />
+                <select value={cond.operator} onChange={(e) => updateCondition(idx, { operator: e.target.value })} style={{ ...inputStyle, flex: 1 }}>
+                  {OPERATORS.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+                <input
+                  type="number"
+                  placeholder="threshold"
+                  value={cond.threshold}
+                  onChange={(e) => updateCondition(idx, { threshold: Number(e.target.value) })}
+                  style={{ ...inputStyle, flex: 1 }}
+                />
+                <input
+                  type="number"
+                  title="Sustained minutes (0 = immediate)"
+                  placeholder="min"
+                  value={cond.duration_minutes ?? 0}
+                  onChange={(e) => updateCondition(idx, { duration_minutes: Number(e.target.value) })}
+                  style={{ ...inputStyle, flex: 1 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeCondition(idx)}
+                  disabled={draft.conditions.length <= 1}
+                  style={{ ...btnStyle('#9ca3af'), padding: '6px 10px' }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button type="button" onClick={addCondition} style={btnStyle('#6b7280')}>
+              + Add condition
+            </button>
           </Field>
           <Field label="Cooldown (min)">
             <input

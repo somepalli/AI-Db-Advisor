@@ -529,16 +529,31 @@ class MetricsCollector:
         }
 
 
+# Cache one MetricsCollector per datasource so rate/delta metrics (deadlocks per
+# minute, checkpoint write time, etc.) — which depend on the previous snapshot held
+# on the collector instance — work across repeated manual /alerts/evaluate calls,
+# not just within the background monitoring service.
+_collectors: Dict[str, "MetricsCollector"] = {}
+
+
 def collect_all_metrics(datasource_id: str) -> Dict[str, Any]:
     """Resolve the datasource's agent and collect all metrics for alert evaluation.
 
-    This is the single shared entry point used by BOTH the manual ``/alerts/evaluate``
-    endpoint and the background monitoring service, so alert behaviour is consistent.
+    This is the single shared entry point used by the manual ``/alerts/evaluate``
+    endpoint. A persistent collector is reused per datasource so delta-based metrics
+    are computed correctly between calls.
     """
     from ..deps import resolve_agent  # local import to avoid circular dependency
 
     agent = resolve_agent(datasource_id)
-    collector = MetricsCollector(agent)
+    collector = _collectors.get(datasource_id)
+    if collector is None:
+        collector = MetricsCollector(agent)
+        _collectors[datasource_id] = collector
+    else:
+        # Refresh the agent in case the datasource connection details changed.
+        collector.agent = agent
+
     metrics = collector.collect_all_metrics(datasource_id)
     metrics.setdefault("datasource_id", datasource_id)
     metrics.setdefault("timestamp", datetime.now().isoformat())

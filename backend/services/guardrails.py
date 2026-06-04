@@ -58,8 +58,12 @@ def check_sql_safety(sql: str, category: str) -> Tuple[bool, str]:
         if sql_upper.startswith('ALTER SYSTEM SET'):
             return False, "ALTER SYSTEM SET requires database restart - use dry_run mode"
 
-    # ALTER TABLE is a structural change: only allowed for partition operations.
+    # ALTER TABLE is a structural change. Allow index/key additions (MySQL expresses
+    # index creation as `ALTER TABLE ... ADD [UNIQUE] INDEX/KEY`) and partition ops;
+    # block everything else (ADD/DROP COLUMN, type changes, etc.).
     if sql_upper.startswith('ALTER TABLE'):
+        if re.search(r'\bADD\s+(UNIQUE\s+)?(INDEX|KEY)\b', sql_upper):
+            return True, ""
         if category == "partition":
             return True, ""
         return False, "Blocked: ALTER TABLE operation detected"
