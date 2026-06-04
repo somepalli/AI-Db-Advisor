@@ -125,7 +125,7 @@ class TestEndToEndWorkflows:
         assert response.status_code == status.HTTP_200_OK
 
     @patch('backend.deps.get_agent_for')
-    @patch('backend.services.ai_client.LLMClient')
+    @patch('backend.routers.analyze.LLMClient')
     def test_workflow_with_ai_recommendations(self, mock_llm_class, mock_get_agent, client, sample_datasource, mock_postgres_agent, sample_sql, mock_llm_client):
         """
         Test workflow with AI-powered recommendations:

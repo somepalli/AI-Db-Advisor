@@ -184,7 +184,7 @@ class TestAnalyzeAPI:
         assert "suggestions" in data
 
     @patch('backend.deps.get_agent_for')
-    @patch('backend.services.ai_client.LLMClient')
+    @patch('backend.routers.analyze.LLMClient')
     def test_explain_plan_ai(self, mock_llm_class, mock_get_agent, client, sample_sql):
         """Test AI-powered EXPLAIN plan explanation"""
         mock_get_agent.return_value = self.mock_agent
