@@ -7,25 +7,40 @@ from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
 import uuid
-import chromadb
 from pathlib import Path
-from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
 # ChromaDB configuration
 CHROMA_DB_DIR = Path(__file__).parent.parent / "chroma_db"
-CHROMA_DB_DIR.mkdir(exist_ok=True)
 
-# Initialize ChromaDB client (persistent) - Using modern PersistentClient
-chroma_client = chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
+# ChromaDB client and the embedding model are heavy (ChromaDB, torch, a ~120MB
+# model download). They are initialised lazily on first use so that importing this
+# module — and the app — does not require them (keeps imports/CI fast and offline-safe).
+_chroma_client = None
+_embedding_model = None
 
-# Initialize embedding model (lightweight, fast)
-# all-MiniLM-L6-v2: 384 dimensions, 120MB, good performance
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
-logger.info(f"ChromaDB initialized at: {CHROMA_DB_DIR}")
-logger.info(f"Embedding model loaded: all-MiniLM-L6-v2")
+def _get_chroma_client():
+    """Lazily create the persistent ChromaDB client."""
+    global _chroma_client
+    if _chroma_client is None:
+        import chromadb
+        CHROMA_DB_DIR.mkdir(exist_ok=True)
+        _chroma_client = chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
+        logger.info(f"ChromaDB initialized at: {CHROMA_DB_DIR}")
+    return _chroma_client
+
+
+def _get_embedding_model():
+    """Lazily load the sentence-transformers embedding model."""
+    global _embedding_model
+    if _embedding_model is None:
+        from sentence_transformers import SentenceTransformer
+        # all-MiniLM-L6-v2: 384 dimensions, ~120MB, good performance
+        _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        logger.info("Embedding model loaded: all-MiniLM-L6-v2")
+    return _embedding_model
 
 
 class ChatMessage:
@@ -74,11 +89,11 @@ def _get_or_create_collection(ds_id: str):
 
     try:
         # Try to get existing collection
-        collection = chroma_client.get_collection(name=collection_name)
+        collection = _get_chroma_client().get_collection(name=collection_name)
         logger.debug(f"Retrieved existing collection: {collection_name}")
     except Exception:
         # Create new collection if doesn't exist
-        collection = chroma_client.create_collection(
+        collection = _get_chroma_client().create_collection(
             name=collection_name,
             metadata={"datasource_id": ds_id}
         )
@@ -128,7 +143,7 @@ def save_message(
         collection = _get_or_create_collection(ds_id)
 
         # Generate embedding
-        embedding = embedding_model.encode(content).tolist()
+        embedding = _get_embedding_model().encode(content).tolist()
 
         # Store in ChromaDB
         collection.add(
@@ -234,7 +249,7 @@ def search_messages(
         collection = _get_or_create_collection(ds_id)
 
         # Generate query embedding
-        query_embedding = embedding_model.encode(query).tolist()
+        query_embedding = _get_embedding_model().encode(query).tolist()
 
         # Build filter
         where_filter = {"ds_id": ds_id}
@@ -325,7 +340,7 @@ def delete_datasource_history(ds_id: str) -> bool:
         collection_name = _get_collection_name(ds_id)
 
         # Delete collection
-        chroma_client.delete_collection(name=collection_name)
+        _get_chroma_client().delete_collection(name=collection_name)
 
         logger.info(f"Deleted chat history for datasource: {ds_id}")
 

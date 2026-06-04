@@ -3,8 +3,8 @@
 Unit tests for utility functions
 """
 import pytest
-from app.utils.sql_parse import mine_predicates, project_columns
-from app.utils.plan_diff import summarize_diff
+from backend.utils.sql_parse import mine_predicates, project_columns
+from backend.utils.plan_diff import summarize_diff
 
 
 class TestSQLParser:
@@ -120,7 +120,7 @@ class TestConfigValidation:
 
     def test_settings_default_values(self):
         """Test default configuration values"""
-        from app.config import settings
+        from backend.config import settings
 
         assert settings.LLM_PROVIDER == "ollama"
         assert settings.LLM_ENDPOINT == "http://127.0.0.1:11434"
@@ -128,7 +128,7 @@ class TestConfigValidation:
 
     def test_settings_env_variable(self):
         """Test settings can be configured via environment"""
-        from app.config import settings
+        from backend.config import settings
 
         # ENV defaults to 'dev'
         assert settings.ENV in ["dev", "prod"]

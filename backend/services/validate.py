@@ -14,42 +14,46 @@ logger = logging.getLogger(__name__)
 MAX_TABLE_ROWS_FOR_VALIDATION = 1_000_000  # Don't validate on huge tables
 VALIDATION_STATEMENT_TIMEOUT = '10s'  # Max time for validation
 VALIDATION_LOCK_TIMEOUT = '2s'  # Max time waiting for locks
+REWRITE_MIN_IMPROVEMENT_PCT = 5.0  # Min cost reduction to consider a rewrite validated
 
 
-def explain_cost(conn: Connection, sql: str) -> Dict[str, Any]:
+def _plan_from_row(row) -> Dict[str, Any]:
+    """Extract the top-level Plan dict from an EXPLAIN (FORMAT JSON) result row."""
+    raw = row[0]
+    plan_json = raw if isinstance(raw, list) else json.loads(raw)
+    return plan_json[0]["Plan"]
+
+
+def explain_cost(conn: Connection, sql: str) -> float:
     """
-    Get EXPLAIN plan cost for a query.
+    Get the estimated total cost of a query via EXPLAIN (FORMAT JSON).
+
+    A statement timeout is applied to keep validation bounded. Any database error
+    propagates to the caller (it is not swallowed).
 
     Args:
         conn: Database connection
         sql: SQL query to explain
 
     Returns:
-        Dict with:
-            - total_cost: Total cost estimate
-            - plan_rows: Estimated rows
-            - node_type: Top-level node type
-            - plan: Full plan JSON
+        The estimated total cost (float).
     """
-    try:
-        with conn.cursor() as cur:
-            cur.execute(f"EXPLAIN (FORMAT JSON) {sql}")
-            result = cur.fetchone()
-            if not result:
-                return {}
-
-            plan_json = result[0] if isinstance(result[0], list) else json.loads(result[0])
-            plan = plan_json[0]["Plan"]
-
-            return {
-                "total_cost": plan.get("Total Cost", 0),
-                "plan_rows": plan.get("Plan Rows", 0),
-                "node_type": plan.get("Node Type", "Unknown"),
-                "plan": plan_json
-            }
-    except Exception as e:
-        logger.error(f"EXPLAIN failed: {e}")
-        return {}
+    with conn.cursor() as cur:
+        # Bound the EXPLAIN with a statement timeout in a single round-trip.
+        # psycopg3 supports multiple statements in one execute() (no parameters here),
+        # and fetchone() returns the EXPLAIN result. We intentionally use session-level
+        # SET (not SET LOCAL) because explain_cost is also called outside a transaction
+        # (autocommit) by validate_rewrite; the validation connection is short-lived, so
+        # the timeout does not leak beyond this validation pass.
+        cur.execute(
+            f"SET statement_timeout = '{VALIDATION_STATEMENT_TIMEOUT}'; "
+            f"EXPLAIN (FORMAT JSON) {sql}"
+        )
+        result = cur.fetchone()
+        if not result:
+            raise ValueError("EXPLAIN returned no result")
+        plan = _plan_from_row(result)
+        return float(plan.get("Total Cost", 0))
 
 
 def validate_index_in_tx(
@@ -74,100 +78,88 @@ def validate_index_in_tx(
 
     Returns:
         Dict with:
-            - validated: True if validation succeeded
-            - before_cost: Cost without index
-            - after_cost: Cost with index (in transaction)
+            - validated: True if the index reduced the estimated cost
+            - cost_before: Cost without index
+            - cost_after: Cost with index (in transaction)
             - cost_delta_pct: Percentage improvement
+            - table: The table being indexed
             - note: Explanation
+
+    Raises:
+        Exception: If the index creation or EXPLAIN fails (after rolling back).
     """
     result = {
         "validated": False,
-        "before_cost": 0,
-        "after_cost": 0,
+        "cost_before": 0,
+        "cost_after": 0,
         "cost_delta_pct": 0,
+        "table": table_name,
         "note": ""
     }
 
     try:
-        # Safety check: Get table size
         with conn.cursor() as cur:
-            cur.execute(f"""
-                SELECT
-                    pg_total_relation_size('{table_name}'::regclass) as size_bytes,
-                    (SELECT COUNT(*) FROM {table_name}) as row_count
-            """)
-            size_check = cur.fetchone()
-
-            if not size_check:
-                result["note"] = "Could not determine table size"
-                return result
-
-            row_count = size_check[1]
-            if row_count > MAX_TABLE_ROWS_FOR_VALIDATION:
-                result["note"] = f"Table too large for validation ({row_count:,} rows > {MAX_TABLE_ROWS_FOR_VALIDATION:,})"
-                return result
-
-        # Get baseline cost (before index)
-        baseline = explain_cost(conn, target_sql)
-        if not baseline:
-            result["note"] = "Failed to get baseline EXPLAIN"
-            return result
-
-        result["before_cost"] = baseline["total_cost"]
-
-        # Now validate in transaction
-        with conn.cursor() as cur:
-            # Start transaction
             cur.execute("BEGIN")
+            cur.execute(f"SET LOCAL statement_timeout = '{VALIDATION_STATEMENT_TIMEOUT}'")
+            cur.execute(f"SET LOCAL lock_timeout = '{VALIDATION_LOCK_TIMEOUT}'")
 
-            try:
-                # Set safety timeouts
-                cur.execute(f"SET LOCAL statement_timeout = '{VALIDATION_STATEMENT_TIMEOUT}'")
-                cur.execute(f"SET LOCAL lock_timeout = '{VALIDATION_LOCK_TIMEOUT}'")
-
-                # Create index in transaction
-                logger.info(f"Creating index in transaction: {create_index_sql}")
-                cur.execute(create_index_sql)
-
-                # Get cost with index
-                cur.execute(f"EXPLAIN (FORMAT JSON) {target_sql}")
-                result_row = cur.fetchone()
-                if result_row:
-                    plan_json = result_row[0] if isinstance(result_row[0], list) else json.loads(result_row[0])
-                    plan = plan_json[0]["Plan"]
-                    result["after_cost"] = plan.get("Total Cost", 0)
-
-                # Rollback transaction (index never actually created)
+            # Safety check on the ACTUAL table size (estimated via pg_class.reltuples —
+            # cheap, no COUNT(*)). Guarding on the query's estimated result rows is wrong:
+            # a selective query on a huge table would still build the index over the whole
+            # table. Skip validation on very large tables regardless of query selectivity.
+            cur.execute(
+                "SELECT COALESCE(reltuples, 0)::bigint FROM pg_class WHERE oid = to_regclass(%s)",
+                (table_name,),
+            )
+            size_row = cur.fetchone()
+            est_rows = int(size_row[0]) if size_row and size_row[0] is not None else 0
+            if est_rows > MAX_TABLE_ROWS_FOR_VALIDATION:
                 cur.execute("ROLLBACK")
-                logger.info("Transaction rolled back - no index created")
+                result["note"] = (
+                    f"Skipped: too many rows ({est_rows:,} > "
+                    f"{MAX_TABLE_ROWS_FOR_VALIDATION:,})"
+                )
+                return result
 
-                # Calculate improvement
-                if result["before_cost"] > 0 and result["after_cost"] > 0:
-                    delta = result["before_cost"] - result["after_cost"]
-                    result["cost_delta_pct"] = round((delta / result["before_cost"]) * 100, 2)
+            # Baseline EXPLAIN (cost without the index).
+            cur.execute(f"EXPLAIN (FORMAT JSON) {target_sql}")
+            baseline_plan = _plan_from_row(cur.fetchone())
+            result["cost_before"] = float(baseline_plan.get("Total Cost", 0))
 
-                    if result["cost_delta_pct"] > 1:  # At least 1% improvement
-                        result["validated"] = True
-                        result["note"] = f"Validated: {result['cost_delta_pct']}% cost reduction"
-                    else:
-                        result["note"] = f"Minimal improvement: {result['cost_delta_pct']}%"
+            # Create the index inside the transaction, then re-plan.
+            logger.info(f"Creating index in transaction: {create_index_sql}")
+            cur.execute(create_index_sql)
+
+            cur.execute(f"EXPLAIN (FORMAT JSON) {target_sql}")
+            after_plan = _plan_from_row(cur.fetchone())
+            result["cost_after"] = float(after_plan.get("Total Cost", 0))
+
+            # Roll back so the index is never actually persisted.
+            cur.execute("ROLLBACK")
+            logger.info("Transaction rolled back - no index created")
+
+            if result["cost_before"] > 0:
+                delta = result["cost_before"] - result["cost_after"]
+                result["cost_delta_pct"] = round((delta / result["cost_before"]) * 100, 2)
+                if result["cost_delta_pct"] > 0:
+                    result["validated"] = True
+                    result["note"] = f"Validated: {result['cost_delta_pct']}% cost reduction"
                 else:
-                    result["note"] = "Could not measure cost delta"
+                    result["note"] = f"No improvement: {result['cost_delta_pct']}%"
+            else:
+                result["note"] = "Could not measure cost delta"
 
-            except Exception as e:
-                # Ensure rollback on error
-                try:
-                    cur.execute("ROLLBACK")
-                except:
-                    pass
-                result["note"] = f"Validation error: {str(e)}"
-                logger.error(f"Validation error: {e}")
+        return result
 
     except Exception as e:
-        result["note"] = f"Failed to validate: {str(e)}"
+        # Best-effort rollback, then propagate so callers know validation failed.
+        try:
+            with conn.cursor() as cur:
+                cur.execute("ROLLBACK")
+        except Exception:
+            pass
         logger.error(f"validate_index_in_tx error: {e}")
-
-    return result
+        raise
 
 
 def validate_rewrite(conn: Connection, original_sql: str, rewritten_sql: str) -> Dict[str, Any]:
@@ -185,44 +177,28 @@ def validate_rewrite(conn: Connection, original_sql: str, rewritten_sql: str) ->
     """
     result = {
         "validated": False,
-        "before_cost": 0,
-        "after_cost": 0,
+        "cost_before": 0,
+        "cost_after": 0,
         "cost_delta_pct": 0,
         "note": ""
     }
 
-    try:
-        # Get cost for original query
-        before = explain_cost(conn, original_sql)
-        if not before:
-            result["note"] = "Failed to EXPLAIN original query"
-            return result
+    # EXPLAIN both queries (errors propagate to the caller).
+    result["cost_before"] = explain_cost(conn, original_sql)
+    result["cost_after"] = explain_cost(conn, rewritten_sql)
 
-        # Get cost for rewritten query
-        after = explain_cost(conn, rewritten_sql)
-        if not after:
-            result["note"] = "Failed to EXPLAIN rewritten query"
-            return result
+    if result["cost_before"] > 0:
+        delta = result["cost_before"] - result["cost_after"]
+        result["cost_delta_pct"] = round((delta / result["cost_before"]) * 100, 2)
 
-        result["before_cost"] = before["total_cost"]
-        result["after_cost"] = after["total_cost"]
-
-        # Calculate improvement
-        if result["before_cost"] > 0:
-            delta = result["before_cost"] - result["after_cost"]
-            result["cost_delta_pct"] = round((delta / result["before_cost"]) * 100, 2)
-
-            if result["cost_delta_pct"] > 1:
-                result["validated"] = True
-                result["note"] = f"Validated: {result['cost_delta_pct']}% cost reduction"
-            else:
-                result["note"] = f"Minimal or negative improvement: {result['cost_delta_pct']}%"
+        # Require a meaningful improvement to consider the rewrite validated.
+        if result["cost_delta_pct"] > REWRITE_MIN_IMPROVEMENT_PCT:
+            result["validated"] = True
+            result["note"] = f"Validated: {result['cost_delta_pct']}% cost reduction"
         else:
-            result["note"] = "Could not measure cost delta"
-
-    except Exception as e:
-        result["note"] = f"Validation error: {str(e)}"
-        logger.error(f"validate_rewrite error: {e}")
+            result["note"] = f"Minimal or negative improvement: {result['cost_delta_pct']}%"
+    else:
+        result["note"] = "Could not measure cost delta"
 
     return result
 

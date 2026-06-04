@@ -9,18 +9,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Dangerous patterns that require extra scrutiny
+# Always-destructive patterns (regardless of WHERE clause)
 DESTRUCTIVE_PATTERNS = [
     (r'\bDROP\s+TABLE\b', "DROP TABLE"),
     (r'\bDROP\s+DATABASE\b', "DROP DATABASE"),
     (r'\bTRUNCATE\b', "TRUNCATE"),
-    (r'\bDELETE\s+FROM\s+\w+\s*;', "DELETE without WHERE"),  # DELETE FROM table;
-    (r'\bUPDATE\s+\w+\s+SET\s+.+?;', "UPDATE without WHERE"),  # Basic check
 ]
 
-# Patterns for mass operations without WHERE clause
+# Patterns for mass DELETE/UPDATE without a WHERE clause (a trailing ';' is allowed).
+# These only fire when no WHERE clause is present (verified separately below).
 MASS_OPERATION_PATTERNS = [
-    (r'\bDELETE\s+FROM\s+(\w+)\s*$', "DELETE without WHERE"),
+    (r'\bDELETE\s+FROM\s+(\w+)\s*;?\s*$', "DELETE without WHERE"),
     (r'\bUPDATE\s+(\w+)\s+SET\b(?:(?!\bWHERE\b).)*$', "UPDATE without WHERE"),
 ]
 
@@ -58,6 +57,16 @@ def check_sql_safety(sql: str, category: str) -> Tuple[bool, str]:
             return True, ""
         if sql_upper.startswith('ALTER SYSTEM SET'):
             return False, "ALTER SYSTEM SET requires database restart - use dry_run mode"
+
+    # ALTER TABLE is a structural change. Allow index/key additions (MySQL expresses
+    # index creation as `ALTER TABLE ... ADD [UNIQUE] INDEX/KEY`) and partition ops;
+    # block everything else (ADD/DROP COLUMN, type changes, etc.).
+    if sql_upper.startswith('ALTER TABLE'):
+        if re.search(r'\bADD\s+(UNIQUE\s+)?(INDEX|KEY)\b', sql_upper):
+            return True, ""
+        if category == "partition":
+            return True, ""
+        return False, "Blocked: ALTER TABLE operation detected"
 
     # Check for destructive patterns
     for pattern, name in DESTRUCTIVE_PATTERNS:
@@ -99,16 +108,20 @@ def check_risk_level(sql: str, category: str, validated: bool) -> str:
     if not sql:
         return "low"  # Notes without SQL are low risk
 
+    # Notes are advisory only — always low risk.
+    if category == "note":
+        return "low"
+
     sql_upper = sql.upper().strip()
 
     # High risk: Unvalidated structural changes
     if category == "partition" and not validated:
         return "high"
 
-    # Medium risk: Index drops, unvalidated indexes
+    # Medium risk: unvalidated indexes; DROP INDEX is high risk (drops an object).
     if category == "index":
         if sql_upper.startswith('DROP INDEX'):
-            return "medium"
+            return "high"
         if not validated and 'CREATE' in sql_upper:
             return "medium"
 
@@ -139,11 +152,8 @@ def should_require_dry_run(risk: str, category: str) -> bool:
     Returns:
         True if dry_run should be required
     """
-    if risk == "high":
-        return True
-
-    # Medium-risk config changes should use dry_run
-    if risk == "medium" and category == "config":
+    # Both high- and medium-risk operations should be dry-run first.
+    if risk in ("high", "medium"):
         return True
 
     return False
@@ -169,6 +179,10 @@ def validate_suggestion_for_apply(
     Returns:
         Tuple of (can_apply, reason)
     """
+    # An empty/None SQL cannot be applied (e.g. a "note" suggestion).
+    if not sql or not sql.strip():
+        return False, "Cannot apply suggestion with empty SQL (no SQL to execute)"
+
     # Check SQL safety
     is_safe, reason = check_sql_safety(sql, category)
     if not is_safe:
@@ -176,7 +190,7 @@ def validate_suggestion_for_apply(
 
     # Check if dry_run is required
     if should_require_dry_run(risk, category) and not dry_run:
-        return False, f"High-risk operation requires dry_run=True for safety"
+        return False, f"This {risk}-risk operation requires dry-run mode first for safety"
 
     logger.info(f"Validated suggestion {suggestion_id} for apply: category={category}, risk={risk}, dry_run={dry_run}")
     return True, ""
@@ -195,6 +209,9 @@ def sanitize_sql(sql: str) -> str:
     # Remove SQL comments
     sql = re.sub(r'--.*$', '', sql, flags=re.MULTILINE)
     sql = re.sub(r'/\*.*?\*/', '', sql, flags=re.DOTALL)
+
+    # Collapse repeated semicolons into a single one
+    sql = re.sub(r';+', ';', sql)
 
     # Normalize whitespace
     sql = ' '.join(sql.split())

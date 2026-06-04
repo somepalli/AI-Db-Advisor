@@ -3,6 +3,7 @@ Suggestions workflow API endpoints.
 Provides headless approval workflow for optimization suggestions.
 """
 from fastapi import APIRouter, HTTPException
+from typing import List, Tuple, Optional
 from ..schemas import (
     AnalyzeSuggestionsRequest,
     AnalyzeSuggestionsResponse,
@@ -16,11 +17,63 @@ from ..deps import resolve_agent
 from ..services.super_agent import analyze_query_suggestions
 from ..services.apply import apply_suggestions
 from ..services.history import record_analyze, record_apply
+from ..services.suggestion_store import suggestion_store
+from ..services.postgres_agent import PostgresAgent
 import logging
 import time
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/suggestions", tags=["suggestions"])
+
+SUPPORTED_SQL_ENGINES = {"postgres"}
+SUPPORTED_SQL_NAMES = {"postgres": "PostgreSQL"}
+SUPPORTED_SQL_DISPLAY = "PostgreSQL"
+
+
+def _resolve_db_type(agent) -> Tuple[str, str]:
+    """
+    Attempt to determine the database type for the provided agent.
+
+    Returns:
+        Tuple[db_type_normalized, agent_class_name]
+    """
+    agent_class = getattr(agent.__class__, "__name__", "") or "UnknownAgent"
+
+    db_type: Optional[str] = None
+    if hasattr(agent, "get_db_type"):
+        try:
+            value = agent.get_db_type()
+            if isinstance(value, str) and value:
+                db_type = value.lower()
+        except Exception as exc:
+            logger.debug(f"get_db_type() failed for {agent_class}: {exc}")
+
+    if not db_type and agent_class:
+        db_type = agent_class.replace("Agent", "").lower()
+
+    return db_type or "unknown", agent_class
+
+
+def _ensure_supported(agent) -> str:
+    """
+    Ensure that the provided agent corresponds to a supported SQL database.
+    Raises HTTPException if not supported.
+
+    Returns:
+        Normalized database type string.
+    """
+    db_type, agent_class = _resolve_db_type(agent)
+
+    if db_type not in SUPPORTED_SQL_ENGINES:
+        raise HTTPException(
+            400,
+            (
+                f"Suggestions workflow currently supports {SUPPORTED_SQL_DISPLAY}. "
+                f"Received: {agent_class}."
+            ),
+        )
+
+    return db_type
 
 
 @router.post("/analyze", response_model=AnalyzeSuggestionsResponse)
@@ -52,10 +105,8 @@ def analyze_suggestions(body: AnalyzeSuggestionsRequest):
         agent = resolve_agent(body.ds_id)
         logger.info(f"Agent: {agent.__class__.__name__}")
 
-        # Support all SQL databases (NoSQL databases have different query structures)
-        db_type = agent.get_db_type()
-        if db_type not in ["postgres", "mysql", "sqlserver", "oracle", "sqlite"]:
-            raise HTTPException(400, f"Suggestions workflow not supported for {db_type} (SQL databases only)")
+        # Support SQL databases only
+        db_type = _ensure_supported(agent)
 
         # Generate suggestions
         suggestions, notes = analyze_query_suggestions(
@@ -66,6 +117,10 @@ def analyze_suggestions(body: AnalyzeSuggestionsRequest):
         )
 
         duration_ms = (time.time() - start_time) * 1000
+
+        if suggestions:
+            # Store suggestions for future /suggestions/apply calls
+            suggestion_store.add_all(body.ds_id, suggestions)
 
         # Record in audit log
         suggestions_dict = [s.model_dump() for s in suggestions]
@@ -124,10 +179,8 @@ def apply_suggestions_endpoint(body: ApplySuggestionsRequest):
         agent = resolve_agent(body.ds_id)
         logger.info(f"Agent: {agent.__class__.__name__}")
 
-        # Support all SQL databases
-        db_type = agent.get_db_type()
-        if db_type not in ["postgres", "mysql", "sqlserver", "oracle", "sqlite"]:
-            raise HTTPException(400, f"Suggestions workflow not supported for {db_type} (SQL databases only)")
+        # Support SQL databases only
+        db_type = _ensure_supported(agent)
 
         # We need to reconstruct Suggestion objects from IDs
         # In a real system, you'd store suggestions in a cache/database
@@ -135,28 +188,74 @@ def apply_suggestions_endpoint(body: ApplySuggestionsRequest):
         # TODO: Implement suggestion caching/storage
 
         notes = []
-        notes.append("Note: Suggestion application requires client to provide full Suggestion objects")
-        notes.append("Current implementation: demonstration only")
 
-        # For demonstration, return empty results
-        # In production, you'd:
-        # 1. Retrieve suggestions from cache by ID
-        # 2. Apply them using services.apply.apply_suggestions()
-        # 3. Record results in audit log
+        # Retrieve stored suggestions by ID
+        stored_suggestions, missing_ids = suggestion_store.get_many(
+            body.suggestion_ids, datasource_id=body.ds_id
+        )
 
-        results = []
-        for sug_id in body.suggestion_ids:
-            results.append(ApplyResult(
-                id=sug_id,
-                status="skipped",
-                message="Suggestion storage not yet implemented - please use /apply_direct endpoint",
-                rollback_sql=None
-            ))
+        if missing_ids:
+            notes.append(
+                "Some suggestion IDs were not found or have expired. "
+                "Regenerate analysis if you need fresh recommendations."
+            )
+
+        apply_results: List[ApplyResult] = []
+
+        if stored_suggestions:
+            logger.info(f"Applying {len(stored_suggestions)} stored suggestion(s)")
+
+            # Apply the stored suggestions
+            try:
+                if isinstance(agent, PostgresAgent):
+                    with agent._conn() as conn:
+                        apply_results = apply_suggestions(conn, stored_suggestions, body.dry_run, db_type)
+                else:
+                    conn = agent._conn()
+                    try:
+                        apply_results = apply_suggestions(conn, stored_suggestions, body.dry_run, db_type)
+                    finally:
+                        conn.close()
+            except Exception as e:
+                logger.error(f"Failed to apply stored suggestions: {e}", exc_info=True)
+                raise
+        else:
+            notes.append("No stored suggestions available to apply.")
+
+        # Any missing IDs should return skipped ApplyResult entries. Clients may then
+        # retry those via /suggestions/apply_direct with the full suggestion payload.
+        if missing_ids:
+            missing_results = [
+                ApplyResult(
+                    id=sug_id,
+                    status="skipped",
+                    message="Suggestion not found or expired. Please re-run analysis to obtain a fresh recommendation.",
+                    rollback_sql=None
+                )
+                for sug_id in missing_ids
+            ]
+
+            apply_results.extend(missing_results)
+
+        # Preserve original ordering of request IDs in response
+        results_by_id = {result.id: result for result in apply_results}
+        ordered_results = [
+            results_by_id.get(
+                sug_id,
+                ApplyResult(
+                    id=sug_id,
+                    status="skipped",
+                    message="Suggestion not found or expired. Please re-run analysis to obtain a fresh recommendation.",
+                    rollback_sql=None
+                )
+            )
+            for sug_id in body.suggestion_ids
+        ]
 
         duration_ms = (time.time() - start_time) * 1000
 
         # Record in audit log
-        results_dict = [r.model_dump() for r in results]
+        results_dict = [r.model_dump() for r in ordered_results]
         record_apply(
             ds_id=body.ds_id,
             suggestion_ids=body.suggestion_ids,
@@ -172,7 +271,7 @@ def apply_suggestions_endpoint(body: ApplySuggestionsRequest):
 
         return ApplySuggestionsResponse(
             notes=notes,
-            results=results
+            results=ordered_results
         )
 
     except HTTPException:
@@ -212,18 +311,11 @@ def apply_suggestions_direct(body: ApplySuggestionsDirectRequest):
         agent = resolve_agent(body.ds_id)
         logger.info(f"Agent: {agent.__class__.__name__}")
 
-        # Support all SQL databases
-        db_type = agent.get_db_type()
-        if db_type not in ["postgres", "mysql", "sqlserver", "oracle", "sqlite"]:
-            raise HTTPException(400, f"Suggestions workflow not supported for {db_type} (SQL databases only)")
-
         notes = []
 
         # Apply suggestions using the apply service
         # PostgreSQL uses context manager, others need explicit close
-        from ..services.postgres_agent import PostgresAgent
-
-        db_type = agent.get_db_type()
+        db_type = _ensure_supported(agent)
         logger.info(f"Database type: {db_type}")
 
         if isinstance(agent, PostgresAgent):

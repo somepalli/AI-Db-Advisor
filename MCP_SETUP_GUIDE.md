@@ -1,8 +1,12 @@
 # Google MCP/Gemini API Setup Guide
 
+> **Scope:** MCP integration currently targets **PostgreSQL only**. When MCP is not
+> configured (`MCP_ENABLED=false`), the UI runs in **demo mode** and shows illustrative
+> sample suggestions, clearly labelled in the MCP panel.
+
 ## Current Status
 
-✅ **API Key Configured**: `REDACTED`
+Set your API key in `.env` as `MCP_API_KEY` (never commit it). See `.env.example`.
 ❌ **Issue Found**: The "MCP" endpoint doesn't exist - this needs to be clarified
 
 ## Important Findings
@@ -11,7 +15,7 @@ After testing your API key, here's what I discovered:
 
 ### 1. The API Key is Valid
 - The API key works with Google APIs
-- Project ID: `REDACTED`
+- Project ID: `<YOUR_GOOGLE_CLOUD_PROJECT_ID>`
 
 ### 2. MCP Endpoint Issue
 The endpoint `https://mcp.googleapis.com/v1` **does not exist**.
@@ -24,7 +28,7 @@ If you want to use Google's Gemini AI model for database suggestions:
 
 **Required Action:**
 1. Enable the Generative Language API in your Google Cloud project
-2. Visit: https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview?project=REDACTED
+2. Visit: https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview?project=<YOUR_GOOGLE_CLOUD_PROJECT_ID>
 3. Click "Enable"
 
 **API Endpoint:** `https://generativelanguage.googleapis.com/v1beta/models`

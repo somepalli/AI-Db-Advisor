@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { Sparkles, Send, Loader2, Copy, Code } from 'lucide-react';
-import { ScrollArea } from './ui/scroll-area';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Card, CardContent } from './ui/card';

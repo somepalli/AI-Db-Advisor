@@ -6,6 +6,7 @@ import { SQLEditorWithAutocomplete } from './components/SQLEditorWithAutocomplet
 import { AIAssistant } from './components/AIAssistant';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import AlertPanel from './components/AlertPanel';
+import { AlertRulesPanel } from './components/AlertRulesPanel';
 import { Separator } from './components/ui/separator';
 import { datasourcesApi, type DataSource } from './api/client';
 
@@ -105,6 +106,7 @@ function App() {
         /* Alerts View */
         <div className="flex-1 overflow-auto bg-background">
           <AlertPanel />
+          <AlertRulesPanel dataSourceId={selectedDataSource} />
         </div>
       ) : currentView === 'query' ? (
         <div className="flex-1 flex overflow-hidden">
@@ -120,7 +122,7 @@ function App() {
 
           {/* Column 2: Database Explorer */}
           <div className="w-80 border-r border-border flex flex-col bg-card">
-            <DBExplorer dataSourceId={selectedDataSource} />
+            <DBExplorer dataSourceId={selectedDataSource ?? ''} />
           </div>
 
           <Separator orientation="vertical" />

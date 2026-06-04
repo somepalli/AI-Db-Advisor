@@ -76,7 +76,7 @@ export function ConnectionPanel({ onSelectDataSource, selectedDataSource }: Prop
   const loadDataSources = async () => {
     try {
       setLoading(true);
-      const savedConnections = connectionStore.getAll();
+      const savedConnections = await connectionStore.getAll();
 
       for (const conn of savedConnections) {
         try {
@@ -125,7 +125,7 @@ export function ConnectionPanel({ onSelectDataSource, selectedDataSource }: Prop
     e.preventDefault();
     try {
       await datasourcesApi.create(formData);
-      connectionStore.save({
+      await connectionStore.save({
         id: formData.id,
         engine: formData.engine,
         dsn: formData.dsn,
@@ -148,7 +148,7 @@ export function ConnectionPanel({ onSelectDataSource, selectedDataSource }: Prop
 
     try {
       await datasourcesApi.delete(dsId);
-      connectionStore.delete(dsId);
+      await connectionStore.delete(dsId);
 
       // If we deleted the selected datasource, clear selection
       if (selectedDataSource === dsId) {

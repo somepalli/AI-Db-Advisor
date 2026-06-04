@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from datetime import datetime
 from unittest.mock import patch
-from app.services.history import (
+from backend.services.history import (
     record_analyze,
     record_apply,
     get_recent_analyses,
@@ -37,7 +37,7 @@ class TestHistoryServices:
     @pytest.fixture(autouse=True)
     def mock_audit_log_file(self, temp_log_file, monkeypatch):
         """Mock the AUDIT_LOG_FILE constant to use temp file"""
-        import app.services.history as history_module
+        import backend.services.history as history_module
         monkeypatch.setattr(history_module, 'AUDIT_LOG_FILE', temp_log_file)
         return temp_log_file
 

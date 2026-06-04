@@ -101,15 +101,35 @@ export function OptimizerConsole({ dsId }: Props) {
 
   const applySelected = async (ids: string[]) => {
     try {
-      // Get full suggestion objects
-      const suggestionsToApply = suggestions.filter((s) => ids.includes(s.id));
-
-      // Use apply_direct endpoint
-      const response = await suggestionsApi.applyDirect({
+      // Prefer the ID-based endpoint: the backend resolves suggestions it persisted
+      // during analysis, so we don't resend full payloads.
+      const response = await suggestionsApi.apply({
         ds_id: dsId,
-        suggestions: suggestionsToApply,
+        suggestion_ids: ids,
         dry_run: dryRun,
       });
+
+      // Any result the store couldn't apply comes back "skipped" — this covers
+      // expired/unknown IDs as well as guardrail blocks. Retry every skipped id we
+      // still hold the full object for via apply_direct; the backend re-runs the same
+      // guardrails, so genuinely-unsafe suggestions remain skipped, while ones skipped
+      // only because the TTL store expired now get applied. (No coupling to message text.)
+      const skippedIds = new Set(
+        response.results.filter((r) => r.status === 'skipped').map((r) => r.id)
+      );
+      const fallbackSuggestions = suggestions.filter((s) => skippedIds.has(s.id));
+      if (fallbackSuggestions.length > 0) {
+        const fallback = await suggestionsApi.applyDirect({
+          ds_id: dsId,
+          suggestions: fallbackSuggestions,
+          dry_run: dryRun,
+        });
+        // Merge fallback results over the skipped placeholders.
+        const fallbackById = new Map(fallback.results.map((r) => [r.id, r]));
+        response.results = response.results.map((r) =>
+          r.status === 'skipped' ? fallbackById.get(r.id) ?? r : r
+        );
+      }
 
       // Add to history
       const historyEntry: ApplyHistoryItem = {
@@ -469,7 +489,7 @@ export function OptimizerConsole({ dsId }: Props) {
                   Applied {entry.suggestion_ids.length} suggestion(s)
                 </div>
                 <div style={{ marginTop: '6px', display: 'flex', gap: '12px', fontSize: '12px' }}>
-                  {entry.results.map((result, ridx) => (
+                  {entry.results.map((result: ApplyResult, ridx: number) => (
                     <div key={ridx}>
                       <span
                         style={{

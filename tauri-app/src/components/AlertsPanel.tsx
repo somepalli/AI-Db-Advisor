@@ -7,7 +7,8 @@
  * 3. All - Complete alert history with status breakdown
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../api/client';
 
 // Types
 interface Alert {
@@ -43,7 +44,7 @@ interface AlertsResponse {
 
 type TabType = 'current' | 'resolved' | 'all';
 
-const API_BASE = 'http://127.0.0.1:8095';
+const API_BASE = API_BASE_URL;
 
 // Severity badge colors
 const severityColors = {

@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 **AI DB Advisor** is a comprehensive multi-database performance optimization system consisting of:
-- **FastAPI Backend** (.venv/app/): REST API for multi-database query analysis and AI-powered optimization
+- **FastAPI Backend** (backend/): REST API for multi-database query analysis and AI-powered optimization
 - **Tauri Desktop App** (tauri-app/): Modern desktop UI built with React/TypeScript and Tauri v2
 
 The system analyzes SQL/NoSQL queries, provides AI-powered suggestions, index recommendations, query rewrites, and detailed execution plans using local LLMs via Ollama.
@@ -54,7 +54,7 @@ The system analyzes SQL/NoSQL queries, provides AI-powered suggestions, index re
 └──────────────────┘          └──────────────────┘
 ```
 
-## Backend Architecture (.venv/app/)
+## Backend Architecture (backend/)
 
 ### Core Components
 
@@ -604,9 +604,8 @@ python populate_university_db.py
 ### Testing
 
 ```bash
-# Backend tests (if available)
-cd .venv/app
-pytest
+# Backend tests (run from repo root)
+python -m pytest backend/tests
 
 # Frontend
 cd tauri-app
@@ -653,7 +652,7 @@ npm run test  # (if test scripts exist)
 
 ```
 ai-db-advisor/
-├── .venv/app/              # FastAPI Backend
+├── backend/                # FastAPI Backend
 │   ├── routers/            # API endpoints
 │   ├── services/           # Business logic
 │   ├── utils/              # Helpers

@@ -11,14 +11,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class _ClickHouseConnWrapper:
-    """Lightweight wrapper to provide a cursor-like interface for context builder."""
+    """Minimal connection wrapper exposing cursor() for shared utilities."""
 
     client: "clickhouse_connect.driver.client.Client"
 
     def cursor(self) -> "_ClickHouseCursor":
         return _ClickHouseCursor(self.client)
 
-    # Support usage in context managers where applicable
     def __enter__(self):
         return self
 
@@ -26,12 +25,12 @@ class _ClickHouseConnWrapper:
         self.close()
 
     def close(self):
-        # clickhouse-connect is stateless; nothing to close.
+        # clickhouse-connect uses stateless HTTP connections; nothing to close.
         return None
 
 
 class _ClickHouseCursor:
-    """Minimal cursor that mimics DB-API behaviour for ClickHouse results."""
+    """Simple cursor wrapper to mimic DB-API behaviour for analytics helpers."""
 
     def __init__(self, client: "clickhouse_connect.driver.client.Client"):
         self._client = client
@@ -53,7 +52,7 @@ class _ClickHouseCursor:
 
 
 class ClickHouseAgent(BaseAgent):
-    """ClickHouse agent implementation using clickhouse-connect HTTP client."""
+    """ClickHouse implementation backed by clickhouse-connect."""
 
     def __init__(self, dsn: str):
         super().__init__(dsn)
@@ -157,7 +156,6 @@ class ClickHouseAgent(BaseAgent):
                 }
             )
 
-        # Namespace tables with database for consistency with other agents
         return {
             "tables": {f"{self._database}.{table}": cols for table, cols in tables.items()}
         }
@@ -200,16 +198,15 @@ class ClickHouseAgent(BaseAgent):
         except Exception as exc:
             logger.warning("ClickHouse query_log unavailable: %s", exc)
 
-        # Fallback to currently running queries
         try:
             running = self._query_dicts(
-                """
+                f"""
                 SELECT query, elapsed AS mean_time_ms, read_rows
                 FROM system.processes
                 WHERE is_initial_query = 1
                 ORDER BY mean_time_ms DESC
                 LIMIT {limit}
-                """.format(limit=limit)
+                """
             )
             return [
                 {
@@ -245,7 +242,7 @@ class ClickHouseAgent(BaseAgent):
                 raise ValueError(f"Failed to explain ClickHouse query: {inner}") from inner
 
     def locks(self) -> List[Dict[str, Any]]:
-        # ClickHouse doesn't expose traditional locks; return empty list.
+        # ClickHouse does not expose traditional lock tables.
         return []
 
     def stats(self) -> Dict[str, Any]:

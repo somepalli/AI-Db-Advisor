@@ -64,10 +64,11 @@ if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -
   if [[ -n "${CLICKHOUSE_ADMIN_PASSWORD}" ]]; then
     client_args+=(--password "${CLICKHOUSE_ADMIN_PASSWORD}")
   fi
+  : "${TOOLBOX_CLICKHOUSE_PASSWORD:?Set TOOLBOX_CLICKHOUSE_PASSWORD in your environment (.env.clickhouse) before running}"
   docker exec -i "${CLICKHOUSE_CONTAINER}" \
     "${client_args[@]}" \
     --multiquery <<SQL
-CREATE USER IF NOT EXISTS ${TOOLBOX_CLICKHOUSE_USER:-toolbox_reader} IDENTIFIED BY '${TOOLBOX_CLICKHOUSE_PASSWORD:-REDACTED}';
+CREATE USER IF NOT EXISTS ${TOOLBOX_CLICKHOUSE_USER:-toolbox_reader} IDENTIFIED BY '${TOOLBOX_CLICKHOUSE_PASSWORD}';
 GRANT SELECT ON ${CLICKHOUSE_DB}.* TO ${TOOLBOX_CLICKHOUSE_USER:-toolbox_reader};
 SQL
 fi

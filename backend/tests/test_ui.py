@@ -139,7 +139,7 @@ class TestUIPages:
         assert sample_datasource["id"] in page_str
         assert "Dashboard" in page_str
 
-    @patch('app.deps.get_agent_for')
+    @patch('backend.deps.get_agent_for')
     def test_ui_pages_dashboard(self, mock_get_agent, client, sample_datasource, mock_postgres_agent):
         """Test dashboard page"""
         # Register datasource and mock agent
@@ -164,7 +164,7 @@ class TestUIPages:
         page_str = str(data)
         assert "Database Size" in page_str or "Active" in page_str
 
-    @patch('app.deps.get_agent_for')
+    @patch('backend.deps.get_agent_for')
     def test_ui_pages_explain_form(self, mock_get_agent, client, sample_datasource, mock_postgres_agent):
         """Test explain query page renders form"""
         client.post("/datasources", json=sample_datasource)
@@ -178,7 +178,7 @@ class TestUIPages:
         assert "EXPLAIN" in page_str
         assert "SQL" in page_str or "Query" in page_str
 
-    @patch('app.deps.get_agent_for')
+    @patch('backend.deps.get_agent_for')
     def test_ui_pages_explain_with_sql(self, mock_get_agent, client, sample_datasource, mock_postgres_agent, sample_sql):
         """Test explain query page with SQL query"""
         client.post("/datasources", json=sample_datasource)
@@ -194,7 +194,7 @@ class TestUIPages:
         assert "Cost" in page_str or "Plan" in page_str
         assert "Seq Scan" in page_str
 
-    @patch('app.deps.get_agent_for')
+    @patch('backend.deps.get_agent_for')
     def test_ui_pages_advise_rule_based(self, mock_get_agent, client, sample_datasource, mock_postgres_agent, sample_sql):
         """Test advisor page with rule-based recommendations"""
         client.post("/datasources", json=sample_datasource)
@@ -212,8 +212,8 @@ class TestUIPages:
         # Should show recommendations section
         assert "Rule-Based" in page_str or "Recommendation" in page_str
 
-    @patch('app.deps.get_agent_for')
-    @patch('app.services.ai_client.LLMClient')
+    @patch('backend.deps.get_agent_for')
+    @patch('backend.services.ai_client.LLMClient')
     def test_ui_pages_advise_ai_mode(self, mock_llm_class, mock_get_agent, client, sample_datasource, mock_postgres_agent, sample_sql, mock_llm_client):
         """Test advisor page with AI mode enabled"""
         client.post("/datasources", json=sample_datasource)
@@ -234,7 +234,7 @@ class TestUIPages:
         response = client.get("/ui/pages/ds/non-existent")
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    @patch('app.deps.get_agent_for')
+    @patch('backend.deps.get_agent_for')
     def test_ui_navigation_buttons(self, mock_get_agent, client, sample_datasource, mock_postgres_agent):
         """Test navigation buttons are present in UI pages"""
         client.post("/datasources", json=sample_datasource)

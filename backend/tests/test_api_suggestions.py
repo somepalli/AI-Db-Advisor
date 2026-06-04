@@ -5,7 +5,7 @@ API tests for suggestions workflow endpoints
 import pytest
 from fastapi import status
 from unittest.mock import patch, MagicMock
-from app.schemas import Suggestion, ApplyResult
+from backend.schemas import Suggestion, ApplyResult
 
 
 class TestSuggestionsAPI:
@@ -18,8 +18,8 @@ class TestSuggestionsAPI:
         self.ds_id = sample_datasource["id"]
         self.mock_agent = mock_postgres_agent
 
-    @patch('app.deps.get_agent_for')
-    @patch('app.routers.suggestions.analyze_query_suggestions')
+    @patch('backend.deps.get_agent_for')
+    @patch('backend.routers.suggestions.analyze_query_suggestions')
     def test_analyze_suggestions_success(self, mock_analyze, mock_get_agent, client, sample_sql):
         """Test successful suggestion analysis"""
         mock_get_agent.return_value = self.mock_agent
@@ -76,8 +76,8 @@ class TestSuggestionsAPI:
         assert data["suggestions"][1]["category"] == "rewrite"
         assert len(data["notes"]) == 2
 
-    @patch('app.deps.get_agent_for')
-    @patch('app.routers.suggestions.analyze_query_suggestions')
+    @patch('backend.deps.get_agent_for')
+    @patch('backend.routers.suggestions.analyze_query_suggestions')
     def test_analyze_suggestions_without_ai(self, mock_analyze, mock_get_agent, client, sample_sql):
         """Test suggestion analysis without AI suggestions"""
         mock_get_agent.return_value = self.mock_agent
@@ -113,7 +113,7 @@ class TestSuggestionsAPI:
         assert len(data["suggestions"]) == 1
         assert "AI suggestions disabled" in data["notes"]
 
-    @patch('app.deps.get_agent_for')
+    @patch('backend.deps.get_agent_for')
     def test_analyze_suggestions_non_postgres(self, mock_get_agent, client, sample_sql):
         """Test that analyze rejects non-PostgreSQL agents"""
         mock_agent = MagicMock()
@@ -131,8 +131,8 @@ class TestSuggestionsAPI:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "PostgreSQL" in response.json()["detail"]
 
-    @patch('app.deps.get_agent_for')
-    @patch('app.routers.suggestions.analyze_query_suggestions')
+    @patch('backend.deps.get_agent_for')
+    @patch('backend.routers.suggestions.analyze_query_suggestions')
     def test_analyze_suggestions_with_errors(self, mock_analyze, mock_get_agent, client, sample_sql):
         """Test suggestion analysis with partial errors"""
         mock_get_agent.return_value = self.mock_agent
@@ -158,7 +158,7 @@ class TestSuggestionsAPI:
         assert len(data["suggestions"]) == 0
         assert len(data["notes"]) == 3
 
-    @patch('app.deps.get_agent_for')
+    @patch('backend.deps.get_agent_for')
     def test_analyze_suggestions_datasource_not_found(self, mock_get_agent, client, sample_sql):
         """Test analyze with non-existent datasource"""
         from fastapi import HTTPException
@@ -174,9 +174,9 @@ class TestSuggestionsAPI:
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    @patch('app.deps.get_agent_for')
-    def test_apply_suggestions_not_implemented(self, mock_get_agent, client):
-        """Test that /apply endpoint returns not-implemented message"""
+    @patch('backend.deps.get_agent_for')
+    def test_apply_suggestions_unknown_ids(self, mock_get_agent, client):
+        """Unknown/expired suggestion IDs should be skipped with a clear message."""
         mock_get_agent.return_value = self.mock_agent
 
         payload = {
@@ -191,10 +191,10 @@ class TestSuggestionsAPI:
         assert "results" in data
         assert len(data["results"]) == 2
         assert all(r["status"] == "skipped" for r in data["results"])
-        assert "not yet implemented" in data["results"][0]["message"]
+        assert "not found or expired" in data["results"][0]["message"].lower()
 
-    @patch('app.deps.get_agent_for')
-    @patch('app.routers.suggestions.apply_suggestions')
+    @patch('backend.deps.get_agent_for')
+    @patch('backend.routers.suggestions.apply_suggestions')
     def test_apply_direct_dry_run_success(self, mock_apply, mock_get_agent, client):
         """Test direct application in dry-run mode"""
         mock_get_agent.return_value = self.mock_agent
@@ -240,8 +240,8 @@ class TestSuggestionsAPI:
         assert data["results"][0]["rollback_sql"] is not None
         assert "Dry-run validated" in data["results"][0]["message"]
 
-    @patch('app.deps.get_agent_for')
-    @patch('app.routers.suggestions.apply_suggestions')
+    @patch('backend.deps.get_agent_for')
+    @patch('backend.routers.suggestions.apply_suggestions')
     def test_apply_direct_real_execution(self, mock_apply, mock_get_agent, client):
         """Test direct application with real execution (dry_run=False)"""
         mock_get_agent.return_value = self.mock_agent
@@ -285,8 +285,8 @@ class TestSuggestionsAPI:
         assert "Applied successfully" in data["results"][0]["message"]
         assert "1/1 suggestions successfully" in " ".join(data["notes"])
 
-    @patch('app.deps.get_agent_for')
-    @patch('app.routers.suggestions.apply_suggestions')
+    @patch('backend.deps.get_agent_for')
+    @patch('backend.routers.suggestions.apply_suggestions')
     def test_apply_direct_with_errors(self, mock_apply, mock_get_agent, client):
         """Test direct application with some failures"""
         mock_get_agent.return_value = self.mock_agent
@@ -377,7 +377,7 @@ class TestSuggestionsAPI:
         assert "1 suggestions failed" in " ".join(data["notes"])
         assert "1 suggestions skipped" in " ".join(data["notes"])
 
-    @patch('app.deps.get_agent_for')
+    @patch('backend.deps.get_agent_for')
     def test_apply_direct_non_postgres(self, mock_get_agent, client):
         """Test that apply_direct rejects non-PostgreSQL agents"""
         mock_agent = MagicMock()
@@ -410,8 +410,8 @@ class TestSuggestionsAPI:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "PostgreSQL" in response.json()["detail"]
 
-    @patch('app.deps.get_agent_for')
-    @patch('app.routers.suggestions.apply_suggestions')
+    @patch('backend.deps.get_agent_for')
+    @patch('backend.routers.suggestions.apply_suggestions')
     def test_apply_direct_batch_application(self, mock_apply, mock_get_agent, client):
         """Test applying multiple suggestions in batch"""
         mock_get_agent.return_value = self.mock_agent
@@ -452,7 +452,7 @@ class TestSuggestionsAPI:
         assert all(r["status"] == "success" for r in data["results"])
         assert "Applied 5/5 suggestions successfully" in " ".join(data["notes"])
 
-    @patch('app.deps.get_agent_for')
+    @patch('backend.deps.get_agent_for')
     def test_apply_direct_invalid_suggestion_schema(self, mock_get_agent, client):
         """Test apply_direct with invalid suggestion schema"""
         mock_get_agent.return_value = self.mock_agent

@@ -57,7 +57,7 @@ export function DataSourceManager({ onSelectDataSource }: Props) {
       setLoading(true);
 
       // First, load saved connections from local storage
-      const savedConnections = connectionStore.getAll();
+      const savedConnections = await connectionStore.getAll();
 
       // Try to register each saved connection with the backend
       for (const conn of savedConnections) {
@@ -91,7 +91,7 @@ export function DataSourceManager({ onSelectDataSource }: Props) {
       await datasourcesApi.create(formData);
 
       // Save to local storage for persistence
-      connectionStore.save({
+      await connectionStore.save({
         id: formData.id,
         engine: formData.engine,
         dsn: formData.dsn,

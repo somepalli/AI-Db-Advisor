@@ -4,7 +4,7 @@ Tests for validation services (transactional validation)
 """
 import pytest
 from unittest.mock import MagicMock, patch
-from app.services.validate import (
+from backend.services.validate import (
     explain_cost,
     validate_index_in_tx,
     validate_rewrite,
@@ -81,6 +81,7 @@ class TestValidationServices:
         after_plan = [{"Plan": {"Total Cost": 250.0, "Plan Rows": 5000}}]
 
         cursor.fetchone.side_effect = [
+            (1000,),         # table-size check (pg_class.reltuples)
             (before_plan,),  # First EXPLAIN (baseline)
             (after_plan,),   # Second EXPLAIN (with index)
         ]
@@ -113,6 +114,7 @@ class TestValidationServices:
         after_plan = [{"Plan": {"Total Cost": 105.0, "Plan Rows": 100}}]  # Worse!
 
         cursor.fetchone.side_effect = [
+            (1000,),
             (before_plan,),
             (after_plan,),
         ]
@@ -132,10 +134,10 @@ class TestValidationServices:
         """Test that transaction is rolled back on error"""
         conn, cursor = mock_connection
 
-        # First EXPLAIN succeeds
+        # Size check returns a small table, baseline EXPLAIN succeeds, CREATE INDEX fails
         cursor.fetchone.side_effect = [
-            ([{"Plan": {"Total Cost": 100.0}}],),
-            Exception("Lock timeout"),  # CREATE INDEX fails
+            (1000,),                              # table-size check
+            ([{"Plan": {"Total Cost": 100.0}}],), # baseline EXPLAIN
         ]
 
         # Should raise but attempt rollback
@@ -143,7 +145,8 @@ class TestValidationServices:
             None,  # BEGIN
             None,  # statement_timeout
             None,  # lock_timeout
-            None,  # First EXPLAIN
+            None,  # table-size check
+            None,  # baseline EXPLAIN
             Exception("Lock timeout"),  # CREATE INDEX fails
         ]
 
@@ -159,9 +162,8 @@ class TestValidationServices:
         """Test validation skips tables with too many rows"""
         conn, cursor = mock_connection
 
-        # Mock table with 2M rows (exceeds 1M limit)
-        before_plan = [{"Plan": {"Total Cost": 1000.0, "Plan Rows": 2000000}}]
-        cursor.fetchone.return_value = (before_plan,)
+        # Mock table-size check returning 2M rows (exceeds 1M limit)
+        cursor.fetchone.return_value = (2000000,)
 
         result = validate_index_in_tx(
             conn,
@@ -291,6 +293,7 @@ class TestValidationServices:
         after_plan = [{"Plan": {"Total Cost": 200.0, "Plan Rows": 1000}}]
 
         cursor.fetchone.side_effect = [
+            (1000,),
             (before_plan,),
             (after_plan,),
         ]
@@ -313,6 +316,7 @@ class TestValidationServices:
         after_plan = [{"Plan": {"Total Cost": 50.0, "Plan Rows": 100}}]
 
         cursor.fetchone.side_effect = [
+            (1000,),
             (before_plan,),
             (after_plan,),
         ]
