@@ -25,14 +25,16 @@ if __name__ == "__main__":
 
     host = os.getenv("API_HOST", "127.0.0.1")
     port = int(os.getenv("API_PORT", "8095"))
+    # Auto-reload for local dev; disable in containers/production via RELOAD=false.
+    reload = os.getenv("RELOAD", "true").lower() in ("1", "true", "yes")
 
-    print(f"[run.py] Serving backend.main:app on http://{host}:{port}")
+    print(f"[run.py] Serving backend.main:app on http://{host}:{port} (reload={reload})")
 
     uvicorn.run(
         "backend.main:app",
         host=host,
         port=port,
-        reload=True,
-        reload_dirs=[str(APP_DIR)],
+        reload=reload,
+        reload_dirs=[str(APP_DIR)] if reload else None,
         log_level="info",
     )

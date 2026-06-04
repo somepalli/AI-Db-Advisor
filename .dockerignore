@@ -1,0 +1,38 @@
+# Build context excludes for the backend image (and to keep context small)
+.git
+.github
+.venv
+myenv
+**/__pycache__
+**/*.pyc
+*.pyo
+
+# Runtime/generated data — never bake into the image
+backend/chroma_db
+backend/logs
+backend/datasources.json
+chroma_db
+datasources.json
+*.log
+
+# Frontend (built in its own image)
+tauri-app/node_modules
+tauri-app/dist
+tauri-app/src-tauri/target
+frontend
+electron-app
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+!.env.docker.example
+
+# Docs/tests not needed at runtime
+htmlcov
+.pytest_cache
+*.md
+docs
+monitoring
+seed

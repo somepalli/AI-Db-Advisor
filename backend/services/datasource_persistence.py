@@ -6,13 +6,14 @@ Saves and loads datasources to/from a JSON file to persist across restarts.
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
-# Store datasources in a JSON file in the app directory
-DATASOURCES_FILE = Path(__file__).parent.parent / "datasources.json"
+# Store datasources in a JSON file (override with DATASOURCES_FILE, e.g. a Docker volume).
+DATASOURCES_FILE = Path(os.getenv("DATASOURCES_FILE") or (Path(__file__).parent.parent / "datasources.json"))
 
 
 def save_datasources(datasources: Dict[str, Any]) -> None:

@@ -6,15 +6,16 @@ from __future__ import annotations
 from typing import List, Dict, Any, Optional
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 import hashlib
 
 logger = logging.getLogger(__name__)
 
-# Log file location
-LOG_DIR = Path(__file__).parent.parent / "logs"
-LOG_DIR.mkdir(exist_ok=True)
+# Log file location (override with LOG_DIR, e.g. a Docker volume).
+LOG_DIR = Path(os.getenv("LOG_DIR") or (Path(__file__).parent.parent / "logs"))
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 AUDIT_LOG_FILE = LOG_DIR / "suggestions_audit.jsonl"
 
 

@@ -1,0 +1,69 @@
+# AI DB Advisor — full stack for testing/production.
+#   1. cp .env.docker.example .env   (then pick your LLM — see DOCKER.md)
+#   2. docker compose up --build
+#   3. open http://localhost:8080
+#
+# Optional bundled LLM:  docker compose --profile ollama up --build
+# (ClickHouse / MCP-Toolbox are intentionally NOT part of this stack.)
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      args:
+        OPTIONAL_DB_DRIVERS: ${OPTIONAL_DB_DRIVERS:-0}
+    image: ai-db-advisor-backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Container runtime overrides (take precedence over .env)
+      API_HOST: 0.0.0.0
+      API_PORT: "8095"
+      RELOAD: "false"
+      # Persistent state lives on the appdata volume
+      CHROMA_DB_DIR: /data/chroma_db
+      DATASOURCES_FILE: /data/datasources.json
+      LOG_DIR: /data/logs
+      HF_HOME: /data/hf-cache
+    volumes:
+      - appdata:/data
+    ports:
+      - "8095:8095"   # optional: direct backend access for debugging
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8095/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./tauri-app
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    image: ai-db-advisor-web
+    ports:
+      - "${WEB_PORT:-8080}:80"   # <-- open this in a browser (override with WEB_PORT)
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Optional bundled local LLM. Enable with: docker compose --profile ollama up
+  # Then pull a model:  docker compose exec ollama ollama pull qwen2.5:7b-instruct
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+
+volumes:
+  appdata:
+  ollama:
