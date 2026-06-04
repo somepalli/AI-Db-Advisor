@@ -34,12 +34,14 @@ function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-function warnOnce(): void {
+function warnOnce(reason?: unknown): void {
   if (!warnedNoKeyring) {
     warnedNoKeyring = true;
     console.warn(
-      '[store] OS keyring unavailable (not running under Tauri). ' +
-        'Connection secrets are stored in localStorage for this dev session only.'
+      '[store] OS keyring unavailable — falling back to localStorage for connection ' +
+        'secrets (not encrypted at rest). This is expected under `vite dev`; under the ' +
+        'desktop app it may indicate the OS secret service is unavailable.',
+      reason ?? ''
     );
   }
 }
@@ -54,29 +56,45 @@ function redactDsn(dsn: string): string {
 async function secretSet(id: string, value: string): Promise<void> {
   const key = SECRET_PREFIX + id;
   if (isTauri()) {
-    await invoke('secret_set', { key, value });
+    try {
+      await invoke('secret_set', { key, value });
+      return;
+    } catch (e) {
+      // Keyring unavailable at runtime (e.g. headless Linux with no Secret Service,
+      // or called before Tauri internals are ready) — fall back rather than lose data.
+      warnOnce(e);
+    }
   } else {
     warnOnce();
-    localStorage.setItem(FALLBACK_SECRET_PREFIX + id, value);
   }
+  localStorage.setItem(FALLBACK_SECRET_PREFIX + id, value);
 }
 
 async function secretGet(id: string): Promise<string | null> {
   const key = SECRET_PREFIX + id;
   if (isTauri()) {
-    return (await invoke<string | null>('secret_get', { key })) ?? null;
+    try {
+      return (await invoke<string | null>('secret_get', { key })) ?? null;
+    } catch (e) {
+      warnOnce(e);
+    }
+  } else {
+    warnOnce();
   }
-  warnOnce();
   return localStorage.getItem(FALLBACK_SECRET_PREFIX + id);
 }
 
 async function secretDelete(id: string): Promise<void> {
   const key = SECRET_PREFIX + id;
   if (isTauri()) {
-    await invoke('secret_delete', { key });
-  } else {
-    localStorage.removeItem(FALLBACK_SECRET_PREFIX + id);
+    try {
+      await invoke('secret_delete', { key });
+    } catch (e) {
+      warnOnce(e);
+    }
   }
+  // Always clear any localStorage fallback copy too.
+  localStorage.removeItem(FALLBACK_SECRET_PREFIX + id);
 }
 
 // --- metadata (localStorage) ----------------------------------------------
@@ -117,22 +135,41 @@ async function migrateLegacySecrets(): Promise<void> {
   } catch {
     return;
   }
-  let changed = false;
+  // Only strip the raw `dsn` from localStorage for entries whose secret was
+  // successfully stored — otherwise a transient keyring failure would permanently
+  // destroy the only copy of the password. Un-migrated entries keep their raw dsn
+  // so a later startup can retry.
+  const migrated = new Set<string>();
+  let sawLegacyDsn = false;
   for (const entry of parsed) {
     if (entry && typeof entry.dsn === 'string' && entry.dsn.length > 0) {
+      sawLegacyDsn = true;
       try {
         if (!(await secretGet(entry.id))) {
           await secretSet(entry.id, entry.dsn);
         }
+        migrated.add(entry.id);
       } catch (e) {
-        console.error(`Failed to migrate secret for ${entry.id}:`, e);
+        console.error(`Failed to migrate secret for ${entry.id} (keeping raw dsn for retry):`, e);
       }
-      changed = true;
     }
   }
-  if (changed) {
-    writeMetas(readMetas()); // readMetas drops the raw dsn via normalization
-  }
+
+  if (!sawLegacyDsn) return;
+
+  const cleaned = parsed.map((entry) => {
+    if (migrated.has(entry.id)) {
+      // Drop the raw secret; keep only redacted metadata.
+      return {
+        id: entry.id,
+        engine: entry.engine,
+        dsnRedacted: entry.dsnRedacted ?? (entry.dsn ? redactDsn(entry.dsn) : ''),
+        createdAt: entry.createdAt ?? new Date().toISOString(),
+      };
+    }
+    return entry; // preserve un-migrated entries (incl. raw dsn) untouched
+  });
+  localStorage.setItem(META_KEY, JSON.stringify(cleaned));
 }
 
 export const connectionStore = {
