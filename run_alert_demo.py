@@ -15,10 +15,10 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 
-# Add app directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '.venv', 'app'))
+# Ensure the repo root is importable so the `backend` package resolves
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from app.services.alert_engine import (
+from backend.services.alert_engine import (
     AlertEngine,
     AlertRule,
     AlertCondition,
@@ -27,8 +27,8 @@ from app.services.alert_engine import (
     Alert,
     MetricSnapshot
 )
-from app.services.alert_analyzer import AlertAnalyzer
-from app.config import settings
+from backend.services.alert_analyzer import AlertAnalyzer
+from backend.config import settings
 
 
 class AlertDemoRunner:

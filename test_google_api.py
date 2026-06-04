@@ -4,6 +4,7 @@ Test script to identify correct Google API endpoint
 import httpx
 import asyncio
 import sys
+import os
 import codecs
 
 # Fix Windows console encoding
@@ -11,7 +12,10 @@ if sys.platform == 'win32':
     sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
     sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
-API_KEY = "AIzaSyD6VA6doaEnnG8MCQJrGL8Brxtvwu6LZLU"
+API_KEY = os.getenv("MCP_API_KEY", "")
+if not API_KEY:
+    print("ERROR: set MCP_API_KEY in your environment (.env) before running this script.")
+    sys.exit(1)
 
 # Possible Google API endpoints
 ENDPOINTS_TO_TEST = [

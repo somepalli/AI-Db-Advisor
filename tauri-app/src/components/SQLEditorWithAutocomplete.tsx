@@ -29,7 +29,7 @@ export function SQLEditorWithAutocomplete({ dataSourceId, onQueryExecute, onCopy
   const [sql, setSql] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<any>(null);
+  const [, setResults] = useState<any>(null);
   const [schema, setSchema] = useState<SchemaResponse | null>(null);
   const [autocompleteItems, setAutocompleteItems] = useState<AutocompleteItem[]>([]);
   const [showAutocomplete, setShowAutocomplete] = useState(false);
@@ -67,7 +67,7 @@ export function SQLEditorWithAutocomplete({ dataSourceId, onQueryExecute, onCopy
     const lines = query.split('\n');
     let position = 0;
 
-    lines.forEach((line, lineIndex) => {
+    lines.forEach((line) => {
       // Check for common syntax errors
 
       // Unclosed quotes
@@ -309,28 +309,6 @@ export function SQLEditorWithAutocomplete({ dataSourceId, onQueryExecute, onCopy
     if (onCopyToAIEditor && sql.trim()) {
       onCopyToAIEditor(sql);
     }
-  };
-
-  const getHighlightedSQL = () => {
-    if (syntaxErrors.length === 0) return sql;
-
-    let result = sql;
-    const parts: Array<{ text: string; error: boolean }> = [];
-    let lastEnd = 0;
-
-    syntaxErrors.forEach(error => {
-      if (error.start > lastEnd) {
-        parts.push({ text: sql.substring(lastEnd, error.start), error: false });
-      }
-      parts.push({ text: sql.substring(error.start, error.end), error: true });
-      lastEnd = error.end;
-    });
-
-    if (lastEnd < sql.length) {
-      parts.push({ text: sql.substring(lastEnd), error: false });
-    }
-
-    return parts;
   };
 
   return (

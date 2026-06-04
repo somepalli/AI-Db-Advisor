@@ -28,8 +28,8 @@ echo.
 echo Both services started!
 echo.
 echo MCP Bridge: http://localhost:3000
-echo API Server: http://localhost:8000
-echo API Docs: http://localhost:8000/docs
+echo API Server: http://localhost:8095
+echo API Docs: http://localhost:8095/docs
 echo.
 echo Check the other windows for service logs
 echo.

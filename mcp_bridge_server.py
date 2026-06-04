@@ -266,8 +266,8 @@ def build_toolbox_command() -> Tuple[List[str], Dict[str, str]]:
     clickhouse_protocol = os.getenv("TOOLBOX_CLICKHOUSE_PROTOCOL", os.getenv("CLICKHOUSE_PROTOCOL", "http"))
     clickhouse_db = os.getenv("TOOLBOX_CLICKHOUSE_DATABASE", os.getenv("CLICKHOUSE_DATABASE", "ai_db_advisor"))
     clickhouse_user = os.getenv("TOOLBOX_CLICKHOUSE_USER", "toolbox_reader")
-    clickhouse_password = os.getenv("TOOLBOX_CLICKHOUSE_PASSWORD", "ToolboxReader#2025")
-    toolbox_api_key = os.getenv("TOOLBOX_API_KEY", "toolbox-local-key")
+    clickhouse_password = os.getenv("TOOLBOX_CLICKHOUSE_PASSWORD", "")
+    toolbox_api_key = os.getenv("TOOLBOX_API_KEY", "")
 
     toolbox_env = {
         "CLICKHOUSE_HOST": clickhouse_host,

@@ -42,7 +42,7 @@ echo   - FastAPI:        python run.py
 echo   - MCP Bridge:     python mcp_http_bridge.py
 echo.
 echo Backend Metrics:
-echo   - FastAPI:        http://127.0.0.1:8000/metrics
+echo   - FastAPI:        http://127.0.0.1:8095/metrics
 echo   - MCP Bridge:     http://localhost:3000/metrics
 echo.
 echo ================================================================================

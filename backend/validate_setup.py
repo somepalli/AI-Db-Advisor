@@ -107,9 +107,9 @@ def check_pytest_config():
 def check_app_imports():
     """Check if app modules can be imported"""
     try:
-        from app.main import app
-        from app.config import settings
-        from app.deps import resolve_agent
+        from backend.main import app
+        from backend.config import settings
+        from backend.deps import resolve_agent
 
         return True, "App modules can be imported"
     except ImportError as e:

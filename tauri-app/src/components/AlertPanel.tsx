@@ -68,7 +68,7 @@ interface Summary {
 // AlertPanel Component
 // ============================================================================
 
-const API_BASE = 'http://127.0.0.1:8095';
+import { alertsApi } from '../api/client';
 
 export default function AlertPanel() {
   const [activeTab, setActiveTab] = useState<TabType>('current');
@@ -87,19 +87,16 @@ export default function AlertPanel() {
     setLoading(true);
     try {
       if (activeTab === 'current') {
-        const response = await fetch(`${API_BASE}/alerts/active`);
-        const data = await response.json();
-        setCurrentAlerts(data.alerts || []);
+        const data = await alertsApi.getActive();
+        setCurrentAlerts((data.alerts || []) as Alert[]);
       } else if (activeTab === 'resolved') {
-        const response = await fetch(`${API_BASE}/alerts/resolved?limit=50`);
-        const data = await response.json();
-        setResolvedAlerts(data.alerts || []);
+        const data = await alertsApi.getResolved(50);
+        setResolvedAlerts((data.alerts || []) as Alert[]);
       } else if (activeTab === 'all') {
-        const response = await fetch(`${API_BASE}/alerts/all?limit=100`);
-        const data = await response.json();
-        setAllAlerts(data.alerts || []);
+        const data = await alertsApi.getAll(100);
+        setAllAlerts((data.alerts || []) as Alert[]);
         if (data.summary) {
-          setSummary(data.summary);
+          setSummary(data.summary as unknown as Summary);
         }
       }
     } catch (error) {
@@ -113,11 +110,7 @@ export default function AlertPanel() {
   const fetchAnalysis = async (alertId: string) => {
     setAnalysisLoading(true);
     try {
-      const encodedId = encodeURIComponent(alertId);
-      const response = await fetch(`${API_BASE}/alerts/${encodedId}/analyze`, {
-        method: 'POST',
-      });
-      const data = await response.json();
+      const data = await alertsApi.analyze(alertId);
       setAnalysis(data);
     } catch (error) {
       console.error('Failed to fetch analysis:', error);
@@ -129,14 +122,9 @@ export default function AlertPanel() {
   // Acknowledge an alert
   const acknowledgeAlert = async (alertId: string) => {
     try {
-      const encodedId = encodeURIComponent(alertId);
-      await fetch(`${API_BASE}/alerts/${encodedId}/acknowledge`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          acknowledged_by: 'UI-Admin',
-          notes: 'Acknowledged from UI',
-        }),
+      await alertsApi.acknowledge(alertId, {
+        acknowledged_by: 'UI-Admin',
+        notes: 'Acknowledged from UI',
       });
       fetchAlerts(); // Refresh
     } catch (error) {
@@ -147,14 +135,9 @@ export default function AlertPanel() {
   // Resolve an alert
   const resolveAlert = async (alertId: string) => {
     try {
-      const encodedId = encodeURIComponent(alertId);
-      await fetch(`${API_BASE}/alerts/${encodedId}/resolve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          resolved_by: 'UI-Admin',
-          notes: 'Resolved from UI',
-        }),
+      await alertsApi.resolve(alertId, {
+        resolved_by: 'UI-Admin',
+        notes: 'Resolved from UI',
       });
       fetchAlerts(); // Refresh
       setSelectedAlert(null);

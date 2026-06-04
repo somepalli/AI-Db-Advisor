@@ -3,7 +3,7 @@
 Tests for guardrails services (SQL safety checks)
 """
 import pytest
-from app.services.guardrails import (
+from backend.services.guardrails import (
     check_sql_safety,
     check_risk_level,
     validate_suggestion_for_apply,

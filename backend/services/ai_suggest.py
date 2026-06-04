@@ -282,10 +282,101 @@ def ai_suggestions_for_sql_generic(agent: BaseAgent, sql: str, llm: LLMClient) -
     # 1) Collect minimal context
     try:
         schema = agent.get_schema()
-        schema_sample = _schema_sample(schema.get("tables", {}))
+        all_tables = schema.get("tables", {})
+        schema_sample = _schema_sample(all_tables)
     except Exception as e:
         logger.warning(f"Schema extraction failed: {e}")
         schema_sample = {}
+        all_tables = {}
+
+    # Validate tables and columns in the SQL query
+    missing_tables = []
+    missing_columns = []
+    validation_warnings = []
+
+    try:
+        # Extract table names and column names from SQL using basic parsing
+        from ..utils.sql_parse import extract_predicates
+
+        # Get all table names from schema (handle schema.table format)
+        existing_tables = set()
+        table_columns_map = {}  # Map of table -> list of columns
+
+        for full_table_name, columns in all_tables.items():
+            # Extract short table name (remove schema prefix)
+            table_short = full_table_name.split(".")[-1] if "." in full_table_name else full_table_name
+            existing_tables.add(table_short.lower())
+
+            # Map columns for this table
+            table_columns_map[table_short.lower()] = [col.get('column', '').lower() for col in columns]
+
+        # Simple SQL parsing to find table names (FROM, JOIN clauses)
+        import re
+        sql_upper = sql.upper()
+
+        # Extract tables from FROM and JOIN clauses
+        from_pattern = r'\bFROM\s+([a-zA-Z_][a-zA-Z0-9_\.]*)'
+        join_pattern = r'\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_\.]*)'
+
+        tables_in_query = set()
+        for match in re.finditer(from_pattern, sql_upper, re.IGNORECASE):
+            table_name = match.group(1).strip().lower()
+            # Remove schema prefix if present
+            table_short = table_name.split(".")[-1] if "." in table_name else table_name
+            tables_in_query.add(table_short)
+
+        for match in re.finditer(join_pattern, sql_upper, re.IGNORECASE):
+            table_name = match.group(1).strip().lower()
+            table_short = table_name.split(".")[-1] if "." in table_name else table_name
+            tables_in_query.add(table_short)
+
+        # Check for missing tables
+        for table in tables_in_query:
+            if table not in existing_tables and not table.startswith('('):  # Exclude subqueries
+                missing_tables.append(table)
+                logger.warning(f"  ⚠ Table '{table}' not found in schema!")
+
+        # Extract column references (basic pattern matching)
+        # This is a simplified approach - real SQL parsing is complex
+        column_pattern = r'([a-zA-Z_][a-zA-Z0-9_]*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)'
+
+        for match in re.finditer(column_pattern, sql, re.IGNORECASE):
+            table_alias = match.group(1).strip().lower()
+            column_name = match.group(2).strip().lower()
+
+            # Try to resolve table alias to actual table
+            # For now, check if column exists in any table
+            found = False
+            for table, cols in table_columns_map.items():
+                if column_name in cols:
+                    found = True
+                    break
+
+            if not found and column_name not in ['*', 'count', 'sum', 'avg', 'min', 'max']:  # Exclude aggregates
+                # Don't add duplicates
+                if column_name not in [c for t, c in missing_columns]:
+                    missing_columns.append((table_alias, column_name))
+                    logger.warning(f"  ⚠ Column '{table_alias}.{column_name}' not found in schema!")
+
+        # Create validation warnings for AI to include in suggestions
+        if missing_tables:
+            validation_warnings.append({
+                "type": "missing_table",
+                "tables": missing_tables,
+                "message": f"Tables not found in schema: {', '.join(missing_tables)}"
+            })
+
+        if missing_columns:
+            validation_warnings.append({
+                "type": "missing_column",
+                "columns": [f"{t}.{c}" for t, c in missing_columns],
+                "message": f"Columns not found in schema: {', '.join([f'{t}.{c}' for t, c in missing_columns])}"
+            })
+
+    except Exception as e:
+        logger.warning(f"SQL validation failed: {e}")
+        import traceback
+        logger.warning(traceback.format_exc())
 
     # Get EXPLAIN plan if available
     plan_excerpt = "(unavailable)"
@@ -337,6 +428,13 @@ CRITICAL: You MUST respond with ONLY valid JSON in this EXACT format:
 {{
   "suggestions": [
     {{
+      "type": "error",
+      "summary": "SQL Error: Missing table or column",
+      "rationale": "The query references tables/columns that don't exist in the schema",
+      "risk": "high",
+      "fix_suggestions": ["Check table name spelling", "Verify column exists"]
+    }},
+    {{
       "type": "index",
       "summary": "Brief description of the suggestion",
       "rationale": "Detailed explanation of why this helps",
@@ -366,16 +464,17 @@ Rules:
 - ALWAYS return valid JSON starting with {{ and ending with }}
 - ALWAYS include the "suggestions" key as the root array
 - Each suggestion MUST have: type, summary, rationale, risk
+- For type="error": Use when SQL has errors (missing tables/columns), include fix_suggestions array
 - For type="index": MUST include "index" object with table and columns (actionable)
 - For type="rewrite": MUST include "new_sql" with the complete rewritten query (actionable)
 - For type="note": Use ONLY for general observations, NOT for actionable suggestions
 - If suggesting an index, use type="index" and provide the index details, NOT type="note"
 - If suggesting a query change, use type="rewrite" and provide new_sql, NOT type="note"
-- risk can be: "low", "medium", or "high"
-- Maximum 3 suggestions
+- risk can be: "low", "medium", or "high" (use "high" for errors)
+- Maximum 3 suggestions (but errors should always be included first)
 - Keep semantics identical for rewrites
 - Use {db_type}-specific syntax and best practices
-- Prioritize actionable suggestions (index/rewrite) over notes
+- Prioritize error suggestions, then actionable suggestions (index/rewrite), then notes
 
 CORRECT Examples:
 ✓ If the query has WHERE student_id=1 ORDER BY due_date and filesort is detected:
@@ -395,12 +494,19 @@ PRIORITY: Always suggest composite indexes (type="index") for queries with files
 DO NOT include any text before or after the JSON object."""
 
     # 3) Ask LLM for JSON suggestions
+    validation_msg = ""
+    if validation_warnings:
+        validation_msg = "\n\n⚠️ VALIDATION WARNINGS:\n"
+        for warning in validation_warnings:
+            validation_msg += f"- {warning['message']}\n"
+        validation_msg += "\nIMPORTANT: Include these validation errors as a separate 'error' type suggestion with suggestions to fix!\n"
+
     user_content = f"""Database Engine: {db_type}
 Schema sample (partial): {json.dumps(schema_sample)}
 SQL:
 {sql}
 Plan excerpt:
-{plan_excerpt}
+{plan_excerpt}{validation_msg}
 
 Constraints:
 - Keep semantics identical if proposing rewrites.
@@ -413,6 +519,7 @@ Constraints:
 - Only use type="note" for general observations that don't have specific SQL actions
 - IMPORTANT: If the plan shows "using_filesort" or "Using temporary", you MUST suggest a composite index using type="index"
 - IMPORTANT: Prioritize index suggestions over rewrites when filesort/temporary tables are present
+- CRITICAL: If there are validation warnings about missing tables or columns, include them as type="error" suggestions first!
 
 Return ONLY JSON."""
 
@@ -558,6 +665,39 @@ Return ONLY JSON."""
             validated_suggestions.append(sug)
 
         suggestions = validated_suggestions
+
+        # Inject validation warnings as error suggestions if not already present
+        if validation_warnings:
+            # Check if AI already included error suggestions
+            has_error_suggestions = any(sug.get('type') == 'error' for sug in suggestions)
+
+            if not has_error_suggestions:
+                logger.info("AI did not include validation warnings - injecting them")
+                # Add validation errors at the beginning
+                for warning in validation_warnings:
+                    error_sug = {
+                        "type": "error",
+                        "summary": f"SQL Error: {warning['type'].replace('_', ' ').title()}",
+                        "rationale": warning['message'],
+                        "risk": "high",
+                        "fix_suggestions": []
+                    }
+
+                    if warning['type'] == 'missing_table':
+                        error_sug['fix_suggestions'] = [
+                            f"Verify table names: {', '.join(warning['tables'])}",
+                            "Check if schema prefix is needed",
+                            "Ensure tables exist in the database"
+                        ]
+                    elif warning['type'] == 'missing_column':
+                        error_sug['fix_suggestions'] = [
+                            f"Verify column names: {', '.join(warning['columns'])}",
+                            "Check table aliases match actual tables",
+                            "Ensure columns exist in their respective tables"
+                        ]
+
+                    # Insert at beginning
+                    suggestions.insert(0, error_sug)
 
         if not suggestions:
             logger.warning("No valid suggestions after validation")

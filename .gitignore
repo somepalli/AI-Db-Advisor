@@ -37,14 +37,23 @@ myenv/
 *.swo
 *~
 
-# Environment variables
+# Environment variables (never commit real .env files; only *.example templates)
 .env
-.env.local
+.env.*
+!.env.example
+!.env.*.example
+!.env.template
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
+
+# Runtime data / generated stores
+chroma_db/
+datasources.json
+backend/datasources.json
+backend/chroma_db/
 
 # Logs
 *.log

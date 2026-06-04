@@ -1,26 +1,24 @@
 @echo off
-REM start_backend.bat - Run the AI DB Advisor backend with myenv Python
+REM start_backend.bat - Run the AI DB Advisor backend
+REM Prefers a local virtual environment if present, otherwise falls back to the
+REM Python on PATH. Create a venv with:
+REM   python -m venv .venv-app
+REM   .venv-app\Scripts\pip install -r requirements.txt
 
 echo ========================================
 echo AI DB Advisor Backend Startup
 echo ========================================
 echo.
 
-REM Check if myenv exists
-if not exist "myenv\Scripts\python.exe" (
-    echo ERROR: myenv not found!
-    echo Please create the virtual environment first:
-    echo   python -m venv myenv
-    echo   myenv\Scripts\pip install -r requirements.txt
-    pause
-    exit /b 1
+if exist ".venv-app\Scripts\python.exe" (
+    echo Using .venv-app Python environment...
+    .venv-app\Scripts\python.exe run.py
+) else if exist "myenv\Scripts\python.exe" (
+    echo Using myenv Python environment...
+    myenv\Scripts\python.exe run.py
+) else (
+    echo No local virtual environment found - using Python on PATH...
+    python run.py
 )
-
-echo Using myenv Python environment...
-echo Python: %cd%\myenv\Scripts\python.exe
-echo.
-
-REM Run the backend with myenv Python
-myenv\Scripts\python.exe run.py
 
 pause

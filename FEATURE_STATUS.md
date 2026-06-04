@@ -27,10 +27,10 @@
 - Analytics endpoints coordinate Postgres→DuckDB syncs, track alignment, and provide dashboard-ready aggregates via the data sync service (.venv/app/routers/analytics.py:1, .venv/app/routers/analytics.py:68, .venv/app/routers/analytics.py:117, .venv/app/services/data_sync.py:18).
 - AI chat (blocking and streaming) builds schema-aware prompts, validates generated SQL, and persists dialogue to Chroma for semantic recall (.venv/app/routers/ai_chat.py:24, .venv/app/routers/ai_chat_stream.py:24, .venv/app/services/chat_history.py:1).
 - Suggestions workflow merges rule-based, AI, and validation results into unified recommendation objects, ready for dry-run or real application (.venv/app/routers/suggestions.py:27, .venv/app/services/super_agent.py:62).
+- Notification channels now derive from typed config fields, removing ad-hoc getattr fallbacks and making SMTP/Slack wiring explicit (.venv/app/config.py:12, .venv/app/services/notification_service.py:30).
 
 ### Needs Implementation
 - Persist analyzed suggestions so `/suggestions/apply` can resolve IDs without clients resubmitting full objects (.venv/app/routers/suggestions.py:132).
-- Add typed configuration for notification channels (SMTP/Slack) instead of relying on undeclared `Settings` attributes and empty fallbacks (.venv/app/config.py:12, .venv/app/services/notification_service.py:30).
 - Reconcile the ClickHouse terminology with the current DuckDB-based sync implementation to avoid operational confusion (.venv/app/routers/analytics.py:1, .venv/app/services/data_sync.py:18).
 - Harden cross-database agent support in analytics and query execution—for example, DuckDB/NoSQL paths skip plan validation and error translation (.venv/app/routers/analyze.py:182, .venv/app/services/duckdb_agent.py:70).
 - Consolidate duplicate metric collector modules so the routing layer and monitoring service share one implementation (.venv/app/services/monitoring_service.py:16, .venv/app/routers/alerts.py:557, .venv/app/services/metric_collector.py:1).

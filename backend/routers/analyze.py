@@ -25,6 +25,182 @@ def explain(ds_id: str, body: ExplainRequest):
     agent = resolve_agent(ds_id)
     return agent.explain(body.sql, analyze=body.analyze)
 
+@router.post("/{ds_id}/execute")
+def execute_query(ds_id: str, body: ExplainRequest):
+    """
+    Execute a SQL query and return results.
+    Supports:
+    - SELECT queries: Returns columns and rows
+    - DDL statements (CREATE INDEX, CREATE TABLE, etc.): Returns success message
+    - DML statements (INSERT, UPDATE, DELETE): Returns affected row count
+    """
+    agent = resolve_agent(ds_id)
+
+    try:
+        conn = agent._conn()
+
+        # Determine database type to handle results properly
+        from ..services.postgres_agent import PostgresAgent
+        from ..services.mysql_agent import MySQLAgent
+        from ..services.sqlserver_agent import SQLServerAgent
+        from ..services.oracle_agent import OracleAgent
+        from ..services.sqlite_agent import SQLiteAgent
+
+        if isinstance(agent, PostgresAgent):
+            # PostgreSQL with psycopg using dict_row factory
+            # Note: rows are already dictionaries due to row_factory=dict_row
+            with conn.cursor() as cur:
+                cur.execute(body.sql)
+
+                # Check if query returns rows (SELECT, etc.)
+                if cur.description:
+                    # Query returns data - rows are already dicts from dict_row factory
+                    columns = [desc[0] for desc in cur.description]
+                    rows = cur.fetchall()  # Already list of dicts!
+
+                    return {
+                        "columns": columns,
+                        "rows": rows,  # No conversion needed - already dicts
+                        "row_count": len(rows),
+                        "status": "success"
+                    }
+                else:
+                    # DDL/DML statement (CREATE, INSERT, UPDATE, DELETE, etc.)
+                    # Get affected rows count if available
+                    affected_rows = cur.rowcount if hasattr(cur, 'rowcount') and cur.rowcount >= 0 else 0
+
+                    return {
+                        "columns": ["status", "message", "affected_rows"],
+                        "rows": [{
+                            "status": "success",
+                            "message": "Statement executed successfully",
+                            "affected_rows": affected_rows
+                        }],
+                        "row_count": 1,
+                        "status": "success"
+                    }
+
+        elif isinstance(agent, (MySQLAgent, SQLiteAgent)):
+            # MySQL with DictCursor, SQLite with Row factory
+            # Note: rows are already dictionaries
+            with conn.cursor() as cur:
+                cur.execute(body.sql)
+
+                # Check if query returns rows
+                if cur.description:
+                    columns = [desc[0] for desc in cur.description]
+                    rows = cur.fetchall()
+
+                    # Convert to list of dicts
+                    # MySQL DictCursor returns dict, SQLite Row needs dict() conversion
+                    if isinstance(agent, MySQLAgent):
+                        data = rows  # Already dicts from DictCursor
+                    else:  # SQLite
+                        data = [dict(row) for row in rows]  # Convert Row to dict
+
+                    conn.close()
+
+                    return {
+                        "columns": columns,
+                        "rows": data,
+                        "row_count": len(data),
+                        "status": "success"
+                    }
+                else:
+                    # DDL/DML statement
+                    affected_rows = cur.rowcount if hasattr(cur, 'rowcount') and cur.rowcount >= 0 else 0
+
+                    conn.close()
+
+                    return {
+                        "columns": ["status", "message", "affected_rows"],
+                        "rows": [{
+                            "status": "success",
+                            "message": "Statement executed successfully",
+                            "affected_rows": affected_rows
+                        }],
+                        "row_count": 1,
+                        "status": "success"
+                    }
+
+        elif isinstance(agent, (SQLServerAgent, OracleAgent)):
+            # SQL Server / Oracle
+            with conn.cursor() as cur:
+                cur.execute(body.sql)
+
+                # Check if query returns rows
+                if cur.description:
+                    columns = [desc[0] for desc in cur.description]
+                    rows = cur.fetchall()
+
+                    # Convert to list of dicts
+                    data = []
+                    for row in rows:
+                        row_dict = {}
+                        for i, col in enumerate(columns):
+                            value = row[i]
+                            # Convert non-serializable types to strings
+                            if hasattr(value, 'isoformat'):  # datetime objects
+                                row_dict[col] = value.isoformat()
+                            elif isinstance(value, (bytes, bytearray)):  # binary data
+                                row_dict[col] = value.hex()
+                            else:
+                                row_dict[col] = value
+                        data.append(row_dict)
+
+                    conn.close()
+
+                    return {
+                        "columns": columns,
+                        "rows": data,
+                        "row_count": len(data),
+                        "status": "success"
+                    }
+                else:
+                    # DDL/DML statement
+                    affected_rows = cur.rowcount if hasattr(cur, 'rowcount') and cur.rowcount >= 0 else 0
+
+                    conn.close()
+
+                    return {
+                        "columns": ["status", "message", "affected_rows"],
+                        "rows": [{
+                            "status": "success",
+                            "message": "Statement executed successfully",
+                            "affected_rows": affected_rows
+                        }],
+                        "row_count": 1,
+                        "status": "success"
+                    }
+
+        else:
+            raise HTTPException(400, f"Query execution not supported for {agent.get_db_type()}")
+
+    except Exception as e:
+        logger.error(f"Query execution failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+        # Extract detailed error information
+        error_type = type(e).__name__
+        error_message = str(e)
+
+        # Return error details in a structured format instead of raising HTTPException
+        return {
+            "columns": ["error_type", "error_message"],
+            "rows": [{
+                "error_type": error_type,
+                "error_message": error_message
+            }],
+            "row_count": 0,
+            "status": "error",
+            "error": {
+                "type": error_type,
+                "message": error_message,
+                "details": error_message  # Full error details
+            }
+        }
+
 @router.get("/{ds_id}/locks")
 def locks(ds_id: str):
     agent = resolve_agent(ds_id)
@@ -99,12 +275,23 @@ def explain_plan_ai(ds_id: str, body: ExplainRequest):
     db_type = agent.get_db_type().upper()
 
     llm = LLMClient()
-    plan = agent.explain(body.sql, analyze=False)["plan"]
+    explain_result = agent.explain(body.sql, analyze=False)
+    plan = explain_result.get("plan") or []
+
+    # Some engines (DuckDB, NoSQL) may not produce a plan or may return an error.
+    # Don't ask the LLM to interpret an empty/errored plan — surface a clear note.
+    if explain_result.get("error") or not plan:
+        reason = explain_result.get("error") or "no execution plan was produced for this engine"
+        return {
+            "explanation": f"Unable to produce an execution plan for this {db_type} query: {reason}",
+            "plan_available": False,
+        }
+
     msg = [
       {"role":"system","content":f"Explain this {db_type} execution plan in clear bullet points. Keep it short and focus on performance implications."},
       {"role":"user","content": json.dumps(plan)}
     ]
-    return {"explanation": llm.chat(msg)}
+    return {"explanation": llm.chat(msg), "plan_available": True}
 
 @router.get("/{ds_id}/indexes")
 def get_indexes(ds_id: str, table: str = Query(None, description="Filter by table name")):

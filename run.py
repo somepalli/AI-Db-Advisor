@@ -14,36 +14,25 @@ logging.basicConfig(
 
 if __name__ == "__main__":
     ROOT = pathlib.Path(__file__).parent.resolve()
-    APP_DIR = ROOT / ".venv" / "app"
-
-    # Check if myenv Python exists
-    MYENV_PYTHON = ROOT / "myenv" / "Scripts" / "python.exe"
-
-    if MYENV_PYTHON.exists():
-        print(f"[run.py] Using myenv Python: {MYENV_PYTHON}")
-        # Ensure we're using myenv
-        if sys.executable.lower() != str(MYENV_PYTHON).lower():
-            print(f"[run.py] WARNING: Not running with myenv Python!")
-            print(f"[run.py] Current Python: {sys.executable}")
-            print(f"[run.py] Please run with: myenv\\Scripts\\python.exe run.py")
-            sys.exit(1)
-    else:
-        print(f"[run.py] WARNING: myenv not found at {MYENV_PYTHON}")
+    APP_DIR = ROOT / "backend"
 
     if not APP_DIR.exists():
-        print(f"[run.py] ERROR: app dir not found at {APP_DIR}")
+        print(f"[run.py] ERROR: backend package not found at {APP_DIR}")
         sys.exit(1)
-    else:
-        print(f"[run.py] Watching: {APP_DIR}")
 
-    # Add .venv to Python path so 'app' module can be found
-    sys.path.insert(0, str(ROOT / ".venv"))
+    # Ensure the repo root is importable so the `backend` package resolves
+    sys.path.insert(0, str(ROOT))
+
+    host = os.getenv("API_HOST", "127.0.0.1")
+    port = int(os.getenv("API_PORT", "8095"))
+
+    print(f"[run.py] Serving backend.main:app on http://{host}:{port}")
 
     uvicorn.run(
-        "app.main:app",
-        host="127.0.0.1",
-        port=8095,
+        "backend.main:app",
+        host=host,
+        port=port,
         reload=True,
         reload_dirs=[str(APP_DIR)],
-        log_level="info",  # Enable INFO level logging
+        log_level="info",
     )

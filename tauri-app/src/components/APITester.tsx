@@ -24,7 +24,7 @@ export function APITester() {
     });
   };
 
-  const testEndpoint = async (name: string, endpoint: string, fn: () => Promise<any>) => {
+  const testEndpoint = async (_name: string, endpoint: string, fn: () => Promise<any>) => {
     updateResult(endpoint, 'pending');
     try {
       const data = await fn();
@@ -78,7 +78,7 @@ export function APITester() {
       analyzeApi.explainPlanAI(testDsId, testSql, false));
 
     await testEndpoint('Hypo Index', `POST /analyze/${testDsId}/hypo-index`, () =>
-      analyzeApi.hypoIndex(testDsId, { sql: testSql, indexes: [] }));
+      analyzeApi.hypoIndex(testDsId, { table: 'students', columns: ['student_id'] }));
 
     setTesting(false);
   };

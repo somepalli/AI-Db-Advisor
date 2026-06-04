@@ -101,15 +101,36 @@ export function OptimizerConsole({ dsId }: Props) {
 
   const applySelected = async (ids: string[]) => {
     try {
-      // Get full suggestion objects
-      const suggestionsToApply = suggestions.filter((s) => ids.includes(s.id));
-
-      // Use apply_direct endpoint
-      const response = await suggestionsApi.applyDirect({
+      // Prefer the ID-based endpoint: the backend resolves suggestions it persisted
+      // during analysis, so we don't resend full payloads.
+      const response = await suggestionsApi.apply({
         ds_id: dsId,
-        suggestions: suggestionsToApply,
+        suggestion_ids: ids,
         dry_run: dryRun,
       });
+
+      // If the server couldn't resolve some IDs (e.g. the TTL store expired),
+      // fall back to apply_direct for just those, sending the full objects.
+      const missingIds = response.results
+        .filter(
+          (r) =>
+            r.status === 'skipped' && /not found|expired|not yet implemented/i.test(r.message)
+        )
+        .map((r) => r.id);
+
+      if (missingIds.length > 0) {
+        const fallbackSuggestions = suggestions.filter((s) => missingIds.includes(s.id));
+        if (fallbackSuggestions.length > 0) {
+          const fallback = await suggestionsApi.applyDirect({
+            ds_id: dsId,
+            suggestions: fallbackSuggestions,
+            dry_run: dryRun,
+          });
+          // Merge fallback results over the skipped placeholders.
+          const fallbackById = new Map(fallback.results.map((r) => [r.id, r]));
+          response.results = response.results.map((r) => fallbackById.get(r.id) ?? r);
+        }
+      }
 
       // Add to history
       const historyEntry: ApplyHistoryItem = {
@@ -469,7 +490,7 @@ export function OptimizerConsole({ dsId }: Props) {
                   Applied {entry.suggestion_ids.length} suggestion(s)
                 </div>
                 <div style={{ marginTop: '6px', display: 'flex', gap: '12px', fontSize: '12px' }}>
-                  {entry.results.map((result, ridx) => (
+                  {entry.results.map((result: ApplyResult, ridx: number) => (
                     <div key={ridx}>
                       <span
                         style={{

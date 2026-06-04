@@ -17,7 +17,7 @@ export function SQLEditor({ dataSourceId, onQueryExecute, onCopyToAIEditor }: Pr
   const [sql, setSql] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<any>(null);
+  const [, setResults] = useState<any>(null);
   const [aiSuggestions, setAiSuggestions] = useState<AIAdviceResponse | null>(null);
   const [rewriteAdvice, setRewriteAdvice] = useState<Recommendation[]>([]);
   const [indexAdvice, setIndexAdvice] = useState<Recommendation[]>([]);
