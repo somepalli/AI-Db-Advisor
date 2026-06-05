@@ -4,6 +4,7 @@ pydantic==2.9.2
 psycopg[binary,pool]==3.2.3
 sqlglot==25.6.0
 python-dotenv==1.0.1
+postgres-mcp>=0.3.0       # Postgres MCP Pro — restricted-mode data access for the gated tool layer
 asyncpg
 pandas
 jinja2

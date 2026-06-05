@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..services.ai_client import LLMClient
-from ..services.llm_settings import update_llm_settings
+from ..services.llm_settings import update_llm_settings, resolve_provider_trust
 
 router = APIRouter(prefix="/llm", tags=["llm"])
 
@@ -14,6 +14,8 @@ class LLMConfigUpdate(BaseModel):
     model: str | None = None
     endpoint: str | None = None
     api_key: str | None = None
+    # Data-access trust override: "" (auto) | "local" | "hosted".
+    provider_trust: str | None = None
 
 
 @router.get("/status")
@@ -36,6 +38,9 @@ def llm_config():
         "model": settings.LLM_MODEL,
         "endpoint": settings.LLM_ENDPOINT,
         "has_api_key": bool(settings.LLM_API_KEY),
+        # provider_trust = resolved effective trust; *_override = the saved override ("" = auto).
+        "provider_trust": resolve_provider_trust(),
+        "provider_trust_override": getattr(settings, "LLM_PROVIDER_TRUST", "") or "",
     }
 
 
@@ -66,5 +71,7 @@ def update_llm_config(cfg: LLMConfigUpdate):
         endpoint=cfg.endpoint,
         # Treat empty string as "leave unchanged" so saving other fields doesn't wipe the key.
         api_key=cfg.api_key if cfg.api_key else None,
+        # provider_trust: None = unchanged, "" = auto-derive, "local"/"hosted" = force.
+        provider_trust=cfg.provider_trust,
     )
     return LLMClient().status()

@@ -24,7 +24,19 @@ LLM_SETTINGS_FILE = Path(
 )
 
 # Settings fields we allow the UI to override.
-_FIELDS = ("LLM_PROVIDER", "LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY")
+_FIELDS = ("LLM_PROVIDER", "LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY", "LLM_PROVIDER_TRUST")
+
+
+def resolve_provider_trust() -> str:
+    """Resolve the effective data-access trust: 'local' or 'hosted'.
+
+    An explicit ``LLM_PROVIDER_TRUST`` override wins; otherwise it derives from the
+    provider — only on-box Ollama is trusted as 'local', every hosted API is 'hosted'.
+    The gated tool layer (services/tool_registry.py) keys data-tool access off this."""
+    override = (getattr(settings, "LLM_PROVIDER_TRUST", "") or "").strip().lower()
+    if override in ("local", "hosted"):
+        return override
+    return "local" if (settings.LLM_PROVIDER or "").lower() == "ollama" else "hosted"
 
 
 def load_llm_settings() -> Dict[str, Any]:
@@ -67,6 +79,7 @@ def update_llm_settings(
     model: Optional[str] = None,
     endpoint: Optional[str] = None,
     api_key: Optional[str] = None,
+    provider_trust: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Update the in-memory ``settings`` and persist. ``None`` means 'leave unchanged'."""
     data = load_llm_settings()
@@ -75,6 +88,7 @@ def update_llm_settings(
         "LLM_MODEL": model,
         "LLM_ENDPOINT": endpoint,
         "LLM_API_KEY": api_key,
+        "LLM_PROVIDER_TRUST": provider_trust,
     }
     for key, value in changes.items():
         if value is not None:

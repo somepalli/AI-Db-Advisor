@@ -14,6 +14,9 @@ from ..deps import resolve_agent
 from ..services.ai_client import LLMClient
 from ..services import chat_history
 from ..services.context_builder import build_ai_context
+from ..services.gated_context import build_gated_context
+from ..services.tool_registry import scrub_literals
+from ..services.llm_settings import resolve_provider_trust
 from ..services.mcp_client import get_mcp_client
 
 logger = logging.getLogger(__name__)
@@ -71,22 +74,37 @@ async def ai_chat(body: ChatRequest):
         agent = resolve_agent(body.ds_id)
         llm = LLMClient()
         db_type = agent.get_db_type().upper()
+        engine = agent.get_db_type().lower()
+        trust = resolve_provider_trust()
 
-        logger.info(f"AI Chat Request - DB: {db_type}, Message: {body.message[:100]}...")
+        logger.info(f"AI Chat Request - DB: {db_type}, trust={trust}, Message: {body.message[:100]}...")
 
-        # Get enhanced schema context with intelligent table selection and sample data
+        # Default the message defensively: scrubbed for hosted Postgres so a context-build
+        # failure can never leave literals in the prompt; the gated path re-confirms below.
+        safe_message = (
+            scrub_literals(body.message)
+            if (engine == "postgres" and trust == "hosted") else body.message
+        )
+
+        # Get schema context. PostgreSQL uses the provider-trust gated path (metadata tools +
+        # sample rows only for local models); other engines keep the legacy context builder.
         try:
             schema = agent.get_schema()
             tables = list(schema.get("tables", {}).keys())
 
-            # Build intelligent context
-            context_str = build_ai_context(
-                ds_id=body.ds_id,
-                user_message=body.message,
-                current_sql=body.current_sql,
-                max_tables=5,
-                include_sample_data=True
-            )
+            if engine == "postgres":
+                context_str, safe_message = await build_gated_context(
+                    ds_id=body.ds_id, engine=engine, trust=trust,
+                    user_message=body.message, current_sql=body.current_sql,
+                )
+            else:
+                context_str = build_ai_context(
+                    ds_id=body.ds_id,
+                    user_message=body.message,
+                    current_sql=body.current_sql,
+                    max_tables=5,
+                    include_sample_data=True
+                )
         except Exception as e:
             logger.warning(f"Context building failed: {e}")
             tables = []
@@ -145,7 +163,8 @@ Wrong SQL: SELECT * FROM enrollments WHERE semester LIKE '%2020%' (if 'semester'
         if body.current_sql:
             user_content_parts.append(f"Current SQL in editor:\n```sql\n{body.current_sql}\n```\n")
 
-        user_content_parts.append(f"User request: {body.message}")
+        # safe_message == body.message for local trust; literals scrubbed for hosted models.
+        user_content_parts.append(f"User request: {safe_message}")
 
         user_content = "\n".join(user_content_parts)
 

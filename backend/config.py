@@ -26,6 +26,11 @@ class Settings(BaseModel):
     LLM_ENDPOINT: str = os.getenv("LLM_ENDPOINT", "http://127.0.0.1:11434")  # Ollama default
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")  # required for openai/anthropic cloud providers
 
+    # Data-access trust for the gated tool layer. "" = auto-derive from LLM_PROVIDER
+    # (ollama -> local, everything else -> hosted); "local"/"hosted" force an override
+    # (e.g. mark a local OpenAI-compatible server as "local"). See services/tool_registry.py.
+    LLM_PROVIDER_TRUST: str = os.getenv("LLM_PROVIDER_TRUST", "")
+
     # MCP (Model Context Protocol) config
     MCP_ENABLED: bool = os.getenv("MCP_ENABLED", "false").lower() == "true"
     MCP_ENDPOINT: str = os.getenv("MCP_ENDPOINT", "https://mcp.googleapis.com/v1")
