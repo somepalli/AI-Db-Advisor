@@ -68,9 +68,45 @@ export interface LLMStatus {
   detail: string;
 }
 
+// Current saved LLM config (the API key is never returned, only whether one is set).
+export interface LLMConfig {
+  provider: string;
+  model: string;
+  endpoint: string;
+  has_api_key: boolean;
+}
+
+// Partial update — omit a field to leave it unchanged.
+export interface LLMConfigUpdate {
+  provider?: string;
+  model?: string;
+  endpoint?: string;
+  api_key?: string;
+}
+
 export const llmApi = {
   status: async (): Promise<LLMStatus> => {
     return apiRequest<LLMStatus>('/llm/status');
+  },
+
+  getConfig: async (): Promise<LLMConfig> => {
+    return apiRequest<LLMConfig>('/llm/config');
+  },
+
+  // Probe a candidate config without saving it (the "Test connection" button).
+  test: async (cfg: LLMConfigUpdate): Promise<LLMStatus> => {
+    return apiRequest<LLMStatus>('/llm/test', {
+      method: 'POST',
+      body: JSON.stringify(cfg),
+    });
+  },
+
+  // Persist a new config; takes effect immediately for all subsequent requests.
+  updateConfig: async (cfg: LLMConfigUpdate): Promise<LLMStatus> => {
+    return apiRequest<LLMStatus>('/llm/config', {
+      method: 'PUT',
+      body: JSON.stringify(cfg),
+    });
   },
 };
 

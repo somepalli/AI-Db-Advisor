@@ -57,6 +57,14 @@ except Exception as e:
     logger = logging.getLogger(__name__)
     logger.warning(f"Failed to load datasources: {e}")
 
+# Overlay any LLM settings configured from the UI (persisted) on top of env defaults
+try:
+    from .services.llm_settings import apply_persisted_llm_settings
+    apply_persisted_llm_settings()
+except Exception as e:
+    import logging
+    logging.getLogger(__name__).warning(f"Failed to load LLM settings: {e}")
+
 
 # Initialize MCP client if enabled
 def initialize_mcp():

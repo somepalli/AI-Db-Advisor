@@ -30,6 +30,7 @@ services:
       # Persistent state lives on the appdata volume
       CHROMA_DB_DIR: /data/chroma_db
       DATASOURCES_FILE: /data/datasources.json
+      LLM_SETTINGS_FILE: /data/llm_settings.json
       LOG_DIR: /data/logs
       HF_HOME: /data/hf-cache
     volumes:

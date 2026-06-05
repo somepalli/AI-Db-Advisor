@@ -55,6 +55,8 @@ chroma_db/
 datasources.json
 backend/datasources.json
 backend/chroma_db/
+llm_settings.json
+backend/llm_settings.json
 
 # Logs
 *.log
