@@ -1,0 +1,11 @@
+# Optional database drivers that require extra SYSTEM packages.
+# These are NOT installed in the default Docker image to keep it lean.
+# Enable them with the OPTIONAL_DB_DRIVERS build arg (see backend.Dockerfile):
+#   docker compose build --build-arg OPTIONAL_DB_DRIVERS=1
+#
+# SQL Server — needs unixODBC + the Microsoft ODBC driver (msodbcsql18) in the image.
+pyodbc==5.1.0
+# Oracle — thin mode needs no Instant Client; thick mode does. oracledb works thin by default.
+oracledb==2.4.1
+# Cassandra — C extensions; no py3.13 wheels, builds from source (needs build-essential).
+cassandra-driver==3.29.2

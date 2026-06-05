@@ -5,14 +5,15 @@ Provides persistent chat storage with semantic search, isolated per datasource.
 from __future__ import annotations
 from typing import List, Dict, Any, Optional
 import logging
+import os
 from datetime import datetime
 import uuid
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# ChromaDB configuration
-CHROMA_DB_DIR = Path(__file__).parent.parent / "chroma_db"
+# ChromaDB configuration (override with CHROMA_DB_DIR, e.g. a Docker volume).
+CHROMA_DB_DIR = Path(os.getenv("CHROMA_DB_DIR") or (Path(__file__).parent.parent / "chroma_db"))
 
 # ChromaDB client and the embedding model are heavy (ChromaDB, torch, a ~120MB
 # model download). They are initialised lazily on first use so that importing this
