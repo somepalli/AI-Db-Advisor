@@ -19,8 +19,6 @@ datasources.json
 tauri-app/node_modules
 tauri-app/dist
 tauri-app/src-tauri/target
-frontend
-electron-app
 
 # Local env / secrets
 .env
@@ -35,4 +33,3 @@ htmlcov
 *.md
 docs
 monitoring
-seed
