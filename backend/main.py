@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import datasources, analyze, suggestions, ai_chat, ai_chat_stream, chat_history, mcp, analytics, alerts
+from .routers import datasources, analyze, suggestions, ai_chat, ai_chat_stream, chat_history, mcp, analytics, alerts, llm
 from .routers.ui import ui
 from .config import settings, initialize_mcp
 import logging
@@ -124,6 +124,7 @@ app.include_router(chat_history.router)
 app.include_router(mcp.router)
 app.include_router(analytics.router)
 app.include_router(alerts.router)
+app.include_router(llm.router)
 app.include_router(ui)
 
 @app.get("/")

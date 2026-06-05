@@ -8,6 +8,7 @@ import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import AlertPanel from './components/AlertPanel';
 import { AlertRulesPanel } from './components/AlertRulesPanel';
 import { Separator } from './components/ui/separator';
+import { LLMStatusBadge } from './components/LLMStatusBadge';
 import { datasourcesApi, type DataSource } from './api/client';
 
 type ViewType = 'query' | 'analytics' | 'alerts';
@@ -96,8 +97,11 @@ function App() {
           </button>
         </div>
 
-        <div className="text-xs text-muted-foreground">
-          Professional Database Management & AI Optimization
+        <div className="flex items-center gap-3">
+          <LLMStatusBadge />
+          <div className="text-xs text-muted-foreground hidden lg:block">
+            Professional Database Management & AI Optimization
+          </div>
         </div>
       </header>
 

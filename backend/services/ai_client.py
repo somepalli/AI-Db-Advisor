@@ -6,6 +6,7 @@ import logging
 import re
 import httpx
 from ..config import settings
+from .dsn_utils import maybe_rewrite_localhost_url
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,9 @@ class LLMClient:
                  endpoint: str | None = None, api_key: str | None = None):
         self.provider = (provider or settings.LLM_PROVIDER or "ollama").lower()
         self.model = model or settings.LLM_MODEL
-        self.endpoint = (endpoint or settings.LLM_ENDPOINT).rstrip("/")
+        # In a container, a localhost endpoint (e.g. a host-run Ollama) must be
+        # redirected to the host machine; no-op outside a container (flag off).
+        self.endpoint = maybe_rewrite_localhost_url((endpoint or settings.LLM_ENDPOINT)).rstrip("/")
         self.api_key = api_key if api_key is not None else getattr(settings, "LLM_API_KEY", "")
 
     # -- public API ---------------------------------------------------------
@@ -44,6 +47,62 @@ class LLMClient:
         if self.provider == "anthropic":
             return self._chat_anthropic(messages, json_response, temperature, max_tokens, stream)
         raise RuntimeError(f"Unsupported LLM provider: {self.provider}")
+
+    def status(self) -> Dict[str, Any]:
+        """Lightweight health probe for the configured LLM, for UI display.
+
+        Returns provider/model/endpoint plus a `connected` flag and a human `detail`.
+        For Ollama it lists installed models and flags whether the configured model
+        is present; for OpenAI-compatible it hits /v1/models; Anthropic is reported as
+        configured when an API key is set (no free reachability probe)."""
+        info: Dict[str, Any] = {
+            "provider": self.provider,
+            "model": self.model,
+            "endpoint": self.endpoint,
+            "connected": False,
+            "models": [],
+            "detail": "",
+        }
+        try:
+            if self.provider == "ollama":
+                with httpx.Client(timeout=5) as client:
+                    resp = client.get(f"{self.endpoint}/api/tags")
+                    resp.raise_for_status()
+                    names = [m.get("name", "") for m in (resp.json().get("models") or [])]
+                info["models"] = names
+                info["connected"] = True
+                if self.model in names:
+                    info["detail"] = f"Connected to Ollama — model '{self.model}' ready"
+                elif names:
+                    info["detail"] = (
+                        f"Connected to Ollama, but model '{self.model}' is not pulled. "
+                        f"Run: ollama pull {self.model}"
+                    )
+                else:
+                    info["detail"] = "Connected to Ollama, but no models are installed"
+            elif self.provider in ("openai", "openai-compatible"):
+                headers = self._openai_headers()
+                base = self.endpoint
+                url = f"{base}/models" if base.endswith("/v1") else f"{base}/v1/models"
+                with httpx.Client(timeout=5) as client:
+                    resp = client.get(url, headers=headers)
+                    resp.raise_for_status()
+                    data = resp.json()
+                info["models"] = [m.get("id", "") for m in (data.get("data") or [])]
+                info["connected"] = True
+                info["detail"] = f"Connected to {self.provider} — model '{self.model}'"
+            elif self.provider == "anthropic":
+                info["connected"] = bool(self.api_key)
+                info["detail"] = (
+                    f"Anthropic configured — model '{self.model}'"
+                    if self.api_key else "Anthropic selected but no API key set (LLM_API_KEY)"
+                )
+            else:
+                info["detail"] = f"Unknown provider '{self.provider}'"
+        except Exception as e:
+            info["connected"] = False
+            info["detail"] = f"Not reachable at {self.endpoint}: {e}"
+        return info
 
     # -- ollama -------------------------------------------------------------
 

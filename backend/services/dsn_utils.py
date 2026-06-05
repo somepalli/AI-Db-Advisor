@@ -56,5 +56,10 @@ def maybe_rewrite_localhost_dsn(dsn: str) -> str:
         netloc += f":{parts.port}"
 
     rewritten = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
-    logger.info("Rewrote DSN host '%s' -> '%s' for container networking", host, replacement)
+    logger.info("Rewrote host '%s' -> '%s' for container networking", host, replacement)
     return rewritten
+
+
+# The same localhost->container-host rewrite applies to any URL (e.g. the LLM
+# endpoint), not just database DSNs. Exposed under a clearer name for that use.
+maybe_rewrite_localhost_url = maybe_rewrite_localhost_dsn
