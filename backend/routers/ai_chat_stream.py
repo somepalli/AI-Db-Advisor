@@ -14,6 +14,9 @@ import asyncio
 from ..deps import resolve_agent
 from ..services.ai_client import LLMClient
 from ..services.context_builder import build_ai_context
+from ..services.gated_context import build_gated_context
+from ..services.tool_registry import scrub_literals
+from ..services.llm_settings import resolve_provider_trust
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai-chat", tags=["ai-chat-stream"])
@@ -48,18 +51,33 @@ async def _stream_chat_response(
         # Resolve agent and get context
         agent = resolve_agent(ds_id)
         db_type = agent.get_db_type().upper()
+        engine = agent.get_db_type().lower()
+        trust = resolve_provider_trust()
 
-        logger.info(f"Streaming AI Chat - DB: {db_type}, Message: {message[:100]}...")
+        logger.info(f"Streaming AI Chat - DB: {db_type}, trust={trust}, Message: {message[:100]}...")
 
-        # Build context
+        # Build context. PostgreSQL uses the provider-trust gated path (sample rows only for
+        # local models, metadata tools sanitized); other engines keep the legacy builder.
+        # Default the message defensively: scrubbed for hosted Postgres so a context-build
+        # failure can never leave literals in the prompt; the gated path re-confirms below.
+        safe_message = (
+            scrub_literals(message)
+            if (engine == "postgres" and trust == "hosted") else message
+        )
         try:
-            context_str = build_ai_context(
-                ds_id=ds_id,
-                user_message=message,
-                current_sql=current_sql,
-                max_tables=5,
-                include_sample_data=True
-            )
+            if engine == "postgres":
+                context_str, safe_message = await build_gated_context(
+                    ds_id=ds_id, engine=engine, trust=trust,
+                    user_message=message, current_sql=current_sql,
+                )
+            else:
+                context_str = build_ai_context(
+                    ds_id=ds_id,
+                    user_message=message,
+                    current_sql=current_sql,
+                    max_tables=5,
+                    include_sample_data=True
+                )
         except Exception as e:
             logger.warning(f"Context building failed: {e}")
             context_str = "Schema unavailable"
@@ -99,7 +117,8 @@ Respond in a natural, conversational tone. You can think out loud as you work th
         user_content_parts = []
         if current_sql:
             user_content_parts.append(f"Current SQL in editor:\n```sql\n{current_sql}\n```\n")
-        user_content_parts.append(f"User request: {message}")
+        # safe_message == message for local trust; literals scrubbed for hosted models.
+        user_content_parts.append(f"User request: {safe_message}")
 
         messages.append({"role": "user", "content": "\n".join(user_content_parts)})
 

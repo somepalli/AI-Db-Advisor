@@ -74,6 +74,9 @@ export interface LLMConfig {
   model: string;
   endpoint: string;
   has_api_key: boolean;
+  // Resolved data-access trust ("local" | "hosted") and the saved override ("" = auto).
+  provider_trust: 'local' | 'hosted';
+  provider_trust_override: '' | 'local' | 'hosted';
 }
 
 // Partial update — omit a field to leave it unchanged.
@@ -82,6 +85,8 @@ export interface LLMConfigUpdate {
   model?: string;
   endpoint?: string;
   api_key?: string;
+  // "" = auto-derive from provider, "local"/"hosted" = force.
+  provider_trust?: '' | 'local' | 'hosted';
 }
 
 export const llmApi = {

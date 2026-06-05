@@ -49,6 +49,7 @@ export function LLMSettingsDialog({ open, onOpenChange, onSaved }: Props) {
   const [model, setModel] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [hasSavedKey, setHasSavedKey] = useState(false);
+  const [trustOverride, setTrustOverride] = useState<'' | 'local' | 'hosted'>('');
   const [probe, setProbe] = useState<LLMStatus | null>(null);
   const [busy, setBusy] = useState<'test' | 'save' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,17 +67,22 @@ export function LLMSettingsDialog({ open, onOpenChange, onSaved }: Props) {
         setEndpoint(cfg.endpoint);
         setModel(cfg.model);
         setHasSavedKey(cfg.has_api_key);
+        setTrustOverride(cfg.provider_trust_override ?? '');
       })
       .catch((e) => setError(e?.message || 'Failed to load current LLM config'));
   }, [open]);
 
   const needsKey = provider === 'openai' || provider === 'anthropic';
+  // Mirror the backend's resolve_provider_trust() so the UI can preview the effective trust.
+  const resolvedTrust: 'local' | 'hosted' =
+    trustOverride || (provider === 'ollama' ? 'local' : 'hosted');
   const payload = () => ({
     provider,
     endpoint: endpoint.trim(),
     model: model.trim(),
     // Empty string => leave the saved key untouched.
     api_key: apiKey || undefined,
+    provider_trust: trustOverride, // "" = auto
   });
 
   const handleTest = async () => {
@@ -182,6 +188,26 @@ export function LLMSettingsDialog({ open, onOpenChange, onSaved }: Props) {
               />
             </div>
           )}
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="llm-trust">Data access</Label>
+            <Select value={trustOverride || 'auto'} onValueChange={(v) => setTrustOverride(v === 'auto' ? '' : (v as 'local' | 'hosted'))}>
+              <SelectTrigger id="llm-trust">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Auto (from provider)</SelectItem>
+                <SelectItem value="local">Force local (full access)</SelectItem>
+                <SelectItem value="hosted">Force hosted (metadata only)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Effective: <span className="font-medium">{resolvedTrust}</span>.{' '}
+              {resolvedTrust === 'hosted'
+                ? 'Hosted models get schema + sanitized metadata only — never sample rows.'
+                : 'Local models may read sample rows and run data tools.'}
+            </p>
+          </div>
 
           {probe && (
             <div
