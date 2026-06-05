@@ -13,6 +13,13 @@ httpx==0.27.2
 duckdb>=1.4.0
 clickhouse-connect==0.7.9
 
+# Database drivers (pure-python / prebuilt wheels — safe in the slim image)
+pymysql==1.1.1            # MySQL / MariaDB
+redis==5.0.8             # Redis
+pymongo==4.8.0           # MongoDB
+# Cassandra (cassandra-driver), SQL Server (pyodbc) and Oracle (oracledb) need a
+# compiler/system packages and lack py3.13 wheels — see requirements-optional.txt
+
 # Vector Database & Embeddings
 chromadb==0.4.22
 sentence-transformers>=2.7.0  # Updated for huggingface_hub compatibility

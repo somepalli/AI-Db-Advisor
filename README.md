@@ -13,6 +13,20 @@ AI DB Advisor is a comprehensive database performance optimization platform that
 
 ---
 
+## 🚀 Run with Docker (fastest)
+
+No toolchains needed — run the backend + web UI with one command:
+
+```bash
+cp .env.docker.example .env     # choose your LLM (Ollama / OpenAI / Anthropic)
+docker compose up --build       # then open http://localhost:8080
+```
+
+See **[DOCKER.md](DOCKER.md)** for LLM options, persistence, and database-driver notes.
+For native/desktop development, see **[INSTALL.md](INSTALL.md)**.
+
+---
+
 ## ✨ Features
 
 ### 🎯 AI-Powered SQL Assistant

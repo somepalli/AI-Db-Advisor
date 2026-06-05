@@ -2,6 +2,11 @@
 
 End-to-end setup for AI DB Advisor (backend + desktop app).
 
+> **Fastest path — Docker.** To run the whole app (backend + web UI) without
+> installing Python/Node/Rust, see **[DOCKER.md](DOCKER.md)**:
+> `cp .env.docker.example .env && docker compose up --build` → open http://localhost:8080.
+> The steps below are for native/desktop development.
+
 ## Prerequisites
 
 - **Python** 3.11+ (3.13 supported)

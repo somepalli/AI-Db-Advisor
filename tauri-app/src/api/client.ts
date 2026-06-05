@@ -58,6 +58,22 @@ export const healthApi = {
   },
 };
 
+// LLM status API
+export interface LLMStatus {
+  provider: string;
+  model: string;
+  endpoint: string;
+  connected: boolean;
+  models: string[];
+  detail: string;
+}
+
+export const llmApi = {
+  status: async (): Promise<LLMStatus> => {
+    return apiRequest<LLMStatus>('/llm/status');
+  },
+};
+
 // Datasources API
 export const datasourcesApi = {
   list: async (): Promise<Record<string, DataSource>> => {

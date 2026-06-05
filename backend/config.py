@@ -12,10 +12,19 @@ class Settings(BaseModel):
     DATASOURCES: dict = {}  # Will be populated from persistence file
     ENV: str = os.getenv("ENV", "dev")
 
-    # LLM config (open-source via Ollama)
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama")  # "ollama" (default)
+    # When running inside a container, a DSN host of localhost/127.0.0.1 points at the
+    # container itself, not the user's machine. If enabled, such hosts are rewritten to
+    # DSN_LOCALHOST_REPLACEMENT (host.docker.internal on Docker Desktop) at connect time,
+    # so users can register datasources with the natural "localhost" host. Off by default;
+    # docker-compose turns it on automatically.
+    REWRITE_LOCALHOST_DSN: bool = os.getenv("REWRITE_LOCALHOST_DSN", "false").lower() == "true"
+    DSN_LOCALHOST_REPLACEMENT: str = os.getenv("DSN_LOCALHOST_REPLACEMENT", "host.docker.internal")
+
+    # LLM config — provider-agnostic: "ollama" (default), "openai" (OpenAI-compatible), "anthropic"
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen2.5:7b-instruct")
     LLM_ENDPOINT: str = os.getenv("LLM_ENDPOINT", "http://127.0.0.1:11434")  # Ollama default
+    LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")  # required for openai/anthropic cloud providers
 
     # MCP (Model Context Protocol) config
     MCP_ENABLED: bool = os.getenv("MCP_ENABLED", "false").lower() == "true"

@@ -13,6 +13,7 @@ from .sqlite_agent import SQLiteAgent
 from .cassandra_agent import CassandraAgent
 from .duckdb_agent import DuckDBAgent
 from .clickhouse_agent import ClickHouseAgent
+from .dsn_utils import maybe_rewrite_localhost_dsn
 
 # Supported database engines
 SUPPORTED_ENGINES = {
@@ -76,6 +77,8 @@ def get_agent_for(engine: str, dsn: str) -> BaseAgent:
 
     if engine_lower in SUPPORTED_ENGINES:
         agent_class = SUPPORTED_ENGINES[engine_lower]
+        # In a container, swap a localhost host for host.docker.internal (no-op otherwise).
+        dsn = maybe_rewrite_localhost_dsn(dsn)
         return agent_class(dsn)
 
     # List supported engines in error message
