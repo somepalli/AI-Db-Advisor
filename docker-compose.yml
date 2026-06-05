@@ -6,6 +6,8 @@
 # Optional bundled LLM:  docker compose --profile ollama up --build
 # (ClickHouse / MCP-Toolbox are intentionally NOT part of this stack.)
 
+name: AI-DBA
+
 services:
   backend:
     build:
@@ -22,6 +24,9 @@ services:
       API_HOST: 0.0.0.0
       API_PORT: "8095"
       RELOAD: "false"
+      # Let users register datasources with "localhost"; rewrite it to the host machine.
+      REWRITE_LOCALHOST_DSN: "true"
+      DSN_LOCALHOST_REPLACEMENT: host.docker.internal
       # Persistent state lives on the appdata volume
       CHROMA_DB_DIR: /data/chroma_db
       DATASOURCES_FILE: /data/datasources.json
@@ -29,6 +34,10 @@ services:
       HF_HOME: /data/hf-cache
     volumes:
       - appdata:/data
+    # Make host.docker.internal resolve on plain Linux Docker too (Docker Desktop
+    # provides it automatically; this is a harmless no-op there).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8095:8095"   # optional: direct backend access for debugging
     healthcheck:

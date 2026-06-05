@@ -62,8 +62,21 @@ docker compose build --build-arg OPTIONAL_DB_DRIVERS=1
 
 ## Connecting to your databases
 
-Use `host.docker.internal` (Docker Desktop) instead of `localhost` in DSNs to reach a
-database running on your host, e.g. `postgresql://user:pass@host.docker.internal:5432/db`.
+A database running on **your machine** can't be reached as `localhost` from inside the
+container — there, `localhost` means the container itself. By default this stack sets
+`REWRITE_LOCALHOST_DSN=true`, so you can register datasources with the natural host and
+the backend rewrites it to `host.docker.internal` (your machine) at connect time:
+
+```
+postgresql://user:pass@localhost:5432/db      # works — auto-rewritten
+postgresql://user:pass@host.docker.internal:5432/db   # also works (explicit)
+```
+
+This applies to every engine (MySQL, Mongo, Redis, etc.). Note that registering a
+datasource only *stores* the DSN — the connection isn't opened until you load a schema or
+run analysis, so an unreachable host only surfaces an error at that point, not at register
+time. To disable the rewrite (e.g. all your databases are remote), set
+`REWRITE_LOCALHOST_DSN=false` in `.env`.
 
 ## Security note
 
