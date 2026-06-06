@@ -2,6 +2,24 @@
 
 Complete monitoring setup with Prometheus, Grafana, and custom metrics for all services.
 
+The monitoring stack is part of the main `docker-compose.yml` under the `monitoring`
+profile, so it shares a network with the app and scrapes the backend directly:
+
+```bash
+cp .env.docker.example .env
+docker compose --profile monitoring up --build
+```
+
+| Service        | URL                          | Notes                              |
+| -------------- | ---------------------------- | ---------------------------------- |
+| Grafana        | http://localhost:3001        | `admin` / `admin123` (overridable) |
+| Prometheus     | http://localhost:9090        | scrapes `backend:8095/metrics`     |
+| PG Exporter    | http://localhost:9187/metrics| `PG_EXPORTER_DSN`                  |
+| Alertmanager   | http://localhost:9093        | `monitoring/alertmanager.yml`      |
+
+Grafana's Prometheus datasource and dashboards are **auto-provisioned** — no manual
+setup needed. The sections below document the metrics and queries in more detail.
+
 ## Architecture
 
 ```
@@ -11,15 +29,15 @@ Complete monitoring setup with Prometheus, Grafana, and custom metrics for all s
 │                   http://localhost:9090                      │
 └───────────┬─────────────────────────────────────────────────┘
             │
-            │ Scrapes Metrics From:
+            │ Scrapes Metrics From (over the compose network):
             │
-    ┌───────┴────────┬─────────────┬──────────────┬────────────┐
-    │                │             │              │            │
-┌───▼────┐  ┌───────▼──────┐  ┌──▼──────┐  ┌───▼─────┐  ┌───▼──────┐
-│FastAPI │  │  MCP Bridge  │  │PostgreSQL│  │Grafana  │  │Prometheus│
-│Backend │  │              │  │ Exporter │  │         │  │  Itself  │
-│:8000   │  │    :3000     │  │  :9187   │  │  :3000  │  │  :9090   │
-└────────┘  └──────────────┘  └──────────┘  └─────────┘  └──────────┘
+    ┌───────┴────────┬──────────────┬───────────────┐
+    │                │              │               │
+┌───▼─────────┐  ┌───▼──────────┐  ┌▼─────────┐  ┌──▼───────┐
+│FastAPI       │  │PostgreSQL    │  │Grafana   │  │Prometheus│
+│Backend       │  │ Exporter     │  │          │  │  Itself  │
+│backend:8095  │  │ :9187        │  │ :3000    │  │  :9090   │
+└──────────────┘  └──────────────┘  └──────────┘  └──────────┘
 ```
 
 ## Services Overview
@@ -47,14 +65,15 @@ Complete monitoring setup with Prometheus, Grafana, and custom metrics for all s
 ### 4. **PostgreSQL Exporter** (Port 9187)
 - **Purpose**: PostgreSQL database metrics
 - **URL**: http://localhost:9187/metrics
-- **Database**: UniversityDB
+- **Database**: set via `PG_EXPORTER_DSN` (defaults to the sample UniversityDB on the host)
 - **Metrics**: Connections, queries, locks, etc.
 
 ## Monitored Applications
 
-### 1. FastAPI Backend (Port 8000)
+### 1. FastAPI Backend (scraped at `backend:8095`)
 
-**Metrics Endpoint**: http://127.0.0.1:8000/metrics
+**Metrics Endpoint**: `http://backend:8095/metrics` in-network
+(`http://localhost:8095/metrics` from the host, since the port is published for debugging)
 
 **Available Metrics**:
 - `http_requests_total` - Total HTTP requests by method, status
@@ -63,30 +82,18 @@ Complete monitoring setup with Prometheus, Grafana, and custom metrics for all s
 - `python_gc_*` - Python garbage collection stats
 - `python_info` - Python version information
 
-**Custom Application Metrics**:
-- Database query performance
-- AI suggestion generation time
-- LLM API call duration
-- Index recommendation counts
+**Custom Application Metrics** (defined in `backend/monitoring/metrics.py`):
+- `db_query_duration_seconds` / `db_queries_total` - database query performance
+- `ai_suggestion_generation_seconds` / `ai_suggestions_generated_total` - AI suggestion timing
+- `llm_api_response_seconds` - LLM API call duration
+- `mcp_operation_total` - in-process MCP operations
+- `index_recommendations_applied_total` / `query_rewrites_applied_total` - optimization actions
 
-### 2. MCP HTTP Bridge (Port 3000)
+> The standalone MCP HTTP bridge is not part of this stack (MCP runs in-process and
+> is off by default), so it is no longer a Prometheus scrape target. MCP activity is
+> captured by the backend's own `mcp_*` metrics above.
 
-**Metrics Endpoint**: http://localhost:3000/metrics
-
-**Available Metrics**:
-- `mcp_requests_total{method, status}` - Total MCP requests
-- `mcp_request_duration_seconds{method}` - MCP request latency
-- `mcp_tools_discovered` - Number of MCP tools available
-- `mcp_server_status` - MCP server health (1=running, 0=stopped)
-- `http_requests_total` - HTTP requests to bridge
-- `http_request_duration_seconds` - HTTP request latency
-
-**Methods Tracked**:
-- `tools/list` - List available tools
-- `tools/call` - Execute MCP tools
-- `query/optimize` - Query optimization requests
-
-### 3. PostgreSQL Database
+### 2. PostgreSQL Database
 
 **Metrics Source**: PostgreSQL Exporter (port 9187)
 
@@ -99,81 +106,56 @@ Complete monitoring setup with Prometheus, Grafana, and custom metrics for all s
 
 ## Quick Start
 
-### 1. Start Monitoring Stack
+### 1. Start the stack with monitoring
 
 ```bash
-# Option 1: Use the startup script
-start_monitoring.bat
-
-# Option 2: Manual start
-docker-compose -f docker-compose.monitoring.yml up -d
+cp .env.docker.example .env          # first time only
+docker compose --profile monitoring up --build
 ```
 
-### 2. Start Backend Services
+This brings up the backend, frontend, Prometheus, Grafana, the PostgreSQL
+exporter, and Alertmanager on one network. Omit `--profile monitoring` to run
+just the app.
 
-**Terminal 1 - FastAPI Backend**:
+### 2. Verify services
+
 ```bash
-python run.py
+# Container status
+docker compose --profile monitoring ps
+
+# Metrics endpoints (from the host)
+curl http://localhost:8095/metrics    # backend (published for debugging)
+curl http://localhost:9187/metrics    # postgres exporter
 ```
 
-**Terminal 2 - MCP Bridge**:
-```bash
-python mcp_http_bridge.py
-```
+Inside the network, Prometheus reaches the backend at `backend:8095` — the app
+does not need to be published for scraping to work.
 
-### 3. Verify Services
-
-Check all services are running:
-```bash
-# Check Docker services
-docker-compose -f docker-compose.monitoring.yml ps
-
-# Test metrics endpoints
-curl http://127.0.0.1:8000/metrics
-curl http://localhost:3000/metrics
-curl http://localhost:9187/metrics
-```
-
-### 4. Access Monitoring Dashboards
+### 3. Access dashboards
 
 1. **Prometheus**: http://localhost:9090
-   - Go to **Status → Targets** to verify all services are being scraped
-   - Query metrics in the **Graph** tab
+   - **Status → Targets** should show `ai-db-advisor-app` (backend) and
+     `postgres-universitydb` as **UP**.
 
-2. **Grafana**: http://localhost:3001
-   - Login: `admin` / `admin123`
-   - Add Prometheus data source (URL: `http://prometheus:9090`)
-   - Import dashboards (see below)
+2. **Grafana**: http://localhost:3001 (`admin` / `admin123`)
+   - The Prometheus datasource and the bundled dashboards are **auto-provisioned**
+     from `monitoring/grafana/provisioning` — no manual setup required.
 
-## Setting Up Grafana
+## Grafana provisioning
 
-### Step 1: Add Prometheus Data Source
+Everything under `monitoring/grafana/provisioning` is loaded on startup:
 
-1. Open http://localhost:3001
-2. Login with `admin` / `admin123`
-3. Go to **Configuration → Data Sources**
-4. Click **Add data source**
-5. Select **Prometheus**
-6. Settings:
-   - Name: `Prometheus`
-   - URL: `http://prometheus:9090`
-   - Access: `Server (default)`
-7. Click **Save & Test**
+- **Datasource** (`datasources/prometheus.yml`): Prometheus at `http://prometheus:9090`,
+  pinned to `uid: prometheus` and marked default. Dashboards reference this uid so
+  their panels bind automatically.
+- **Dashboards** (`dashboards/dashboards.yml` → `monitoring/grafana/dashboards/`):
+  the FastAPI backend dashboard is active. (The MCP and ClickHouse dashboards ship
+  but stay empty — those components are not part of this stack.)
 
-### Step 2: Import Dashboards
-
-#### PostgreSQL Dashboard
-1. Go to **Dashboards → Import**
-2. Enter ID: **9628**
-3. Select Prometheus data source
-4. Click **Import**
-
-#### FastAPI/MCP Custom Dashboard
-Create a new dashboard with panels for:
-- Request rate: `rate(http_requests_total[5m])`
-- Request duration: `http_request_duration_seconds`
-- MCP tool calls: `rate(mcp_requests_total[5m])`
-- MCP latency: `mcp_request_duration_seconds`
+To add your own dashboard, drop its JSON into `monitoring/grafana/dashboards/`
+(set each panel's datasource uid to `prometheus`) and restart Grafana. To import a
+community dashboard such as the PostgreSQL one (ID **9628**), use **Dashboards →
+Import** in the UI and pick the Prometheus datasource.
 
 ## Useful Prometheus Queries
 
@@ -268,18 +250,20 @@ Alert rules are defined in `monitoring/alerts.yml`. Examples:
 **Problem**: "Error reading Prometheus" in Grafana
 
 **Solution**:
-1. Use URL: `http://prometheus:9090` (container name, not localhost)
-2. Verify Prometheus is running: `docker ps`
-3. Test from Grafana container: `docker exec -it ai-db-advisor-grafana curl http://prometheus:9090`
+1. The provisioned datasource already uses `http://prometheus:9090` (service name, not localhost)
+2. Verify Prometheus is running: `docker compose --profile monitoring ps`
+3. Test from the Grafana container: `docker compose exec grafana wget -qO- http://prometheus:9090/-/healthy`
 
-### MCP Bridge metrics not updating
+### Backend target shows DOWN in Prometheus
 
-**Problem**: Metrics show old data or zeros
+**Problem**: The `ai-db-advisor-app` target is DOWN.
 
 **Solution**:
-1. Restart MCP bridge: Stop and run `python mcp_http_bridge.py`
-2. Make a test request: `curl http://localhost:3000/tools`
-3. Check metrics: `curl http://localhost:3000/metrics`
+1. Confirm the backend is healthy: `docker compose ps` (should be `healthy`).
+2. Prometheus scrapes `backend:8095` over the compose network — both must be in the
+   same project/network. Start them together: `docker compose --profile monitoring up`.
+3. Check the endpoint from Prometheus's container:
+   `docker compose exec prometheus wget -qO- http://backend:8095/metrics | head`
 
 ## Production Considerations
 
@@ -330,7 +314,7 @@ Alert rules are defined in `monitoring/alerts.yml`. Examples:
 ## Support
 
 For issues or questions:
-1. Check application logs: `docker-compose -f docker-compose.monitoring.yml logs`
+1. Check logs: `docker compose --profile monitoring logs -f prometheus grafana`
 2. Verify configuration files in `monitoring/` directory
 3. Test individual services with curl commands
 4. Review Prometheus targets: http://localhost:9090/targets
