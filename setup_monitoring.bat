@@ -141,19 +141,19 @@ echo Next steps:
 echo 1. Install Docker Desktop for Windows if not installed
 echo    Download from: https://www.docker.com/products/docker-desktop/
 echo.
-echo 2. Start monitoring stack:
-echo    docker-compose -f docker-compose.monitoring.yml up -d
+echo 2. Start the app + monitoring stack (one command):
+echo    docker compose --profile monitoring up --build
 echo.
 echo 3. Access services:
 echo    - Prometheus: http://localhost:9090
 echo    - Grafana: http://localhost:3001 (admin/admin123)
 echo    - AlertManager: http://localhost:9093
 echo.
-echo 4. Start your application with metrics:
-echo    python run.py
+echo 4. Grafana's Prometheus datasource and dashboards are auto-provisioned.
+echo    (For community dashboards like ID 9628, use Dashboards ^> Import.)
 echo.
-echo 5. Verify metrics endpoint:
-echo    curl http://localhost:8000/metrics
+echo 5. Verify the backend metrics endpoint:
+echo    curl http://localhost:8095/metrics
 echo.
 echo Press any key to exit...
 pause >nul

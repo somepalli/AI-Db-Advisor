@@ -13,7 +13,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -90,7 +90,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "rate(http_requests_total{job=\"ai-db-advisor-app\"}[5m])",
           "legendFormat": "{{method}} {{handler}}",
@@ -103,7 +103,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -158,7 +158,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "http_requests_inprogress{job=\"ai-db-advisor-app\"}",
           "refId": "A"
@@ -170,7 +170,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -225,7 +225,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "sum(http_requests_total{job=\"ai-db-advisor-app\"})",
           "refId": "A"
@@ -237,7 +237,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -315,7 +315,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "histogram_quantile(0.95, rate(http_request_duration_highr_seconds_bucket{job=\"ai-db-advisor-app\"}[5m]))",
           "legendFormat": "p95",
@@ -324,7 +324,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "histogram_quantile(0.50, rate(http_request_duration_highr_seconds_bucket{job=\"ai-db-advisor-app\"}[5m]))",
           "legendFormat": "p50",
@@ -337,7 +337,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -460,7 +460,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "rate(http_requests_total{job=\"ai-db-advisor-app\",status=~\"2..\"}[5m])",
           "legendFormat": "2xx Success",
@@ -469,7 +469,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "rate(http_requests_total{job=\"ai-db-advisor-app\",status=~\"4..\"}[5m])",
           "legendFormat": "4xx Client Error",
@@ -478,7 +478,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "rate(http_requests_total{job=\"ai-db-advisor-app\",status=~\"5..\"}[5m])",
           "legendFormat": "5xx Server Error",
@@ -491,7 +491,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -568,7 +568,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "python_gc_objects_collected_total{job=\"ai-db-advisor-app\"}",
           "legendFormat": "Generation {{generation}}",
@@ -581,7 +581,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -627,7 +627,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "prometheus"
           },
           "expr": "topk(10, sum by(handler) (http_requests_total{job=\"ai-db-advisor-app\"}))",
           "legendFormat": "{{handler}}",

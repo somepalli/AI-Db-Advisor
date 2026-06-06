@@ -74,6 +74,77 @@ services:
       - "11434:11434"
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # Monitoring stack (Prometheus + Grafana + exporters). Opt-in:
+  #   docker compose --profile monitoring up --build
+  # Prometheus scrapes the backend's /metrics over the compose network
+  # (backend:8095), so the app does not need to be published for monitoring.
+  #   Grafana:    http://localhost:${GRAFANA_PORT:-3001}  (admin / admin123)
+  #   Prometheus: http://localhost:${PROMETHEUS_PORT:-9090}
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    profiles: ["monitoring"]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    profiles: ["monitoring"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin123}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # PostgreSQL metrics exporter. Defaults to the sample UniversityDB on the host;
+  # point PG_EXPORTER_DSN at your own database to monitor it instead.
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    profiles: ["monitoring"]
+    environment:
+      DATA_SOURCE_NAME: ${PG_EXPORTER_DSN:-postgresql://postgres:postgres@host.docker.internal:5432/UniversityDB?sslmode=disable}
+    ports:
+      - "9187:9187"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    profiles: ["monitoring"]
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    ports:
+      - "9093:9093"
+    restart: unless-stopped
+
 volumes:
   appdata:
   ollama:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:

@@ -39,9 +39,26 @@ gateways — just point `LLM_ENDPOINT` at them.
 | `frontend` (nginx + web UI) | `8080` | The URL you open. Proxies `/api/*` → backend. |
 | `backend` (FastAPI) | `8095` | Exposed for debugging; the UI uses it via the proxy. |
 | `ollama` *(profile `ollama`)* | `11434` | Optional bundled LLM, off by default. |
+| `prometheus` *(profile `monitoring`)* | `9090` | Scrapes `backend:8095/metrics`. |
+| `grafana` *(profile `monitoring`)* | `3001` | Dashboards, auto-provisioned. `admin`/`admin123`. |
+| `postgres-exporter` *(profile `monitoring`)* | `9187` | DB metrics via `PG_EXPORTER_DSN`. |
+| `alertmanager` *(profile `monitoring`)* | `9093` | Alert routing. |
 
-ClickHouse and the MCP Toolbox are **not** bundled. The Prometheus/Grafana monitoring
-stack stays separate (`docker-compose.monitoring.yml`).
+ClickHouse and the MCP Toolbox are **not** bundled.
+
+### Monitoring
+
+Prometheus + Grafana are folded into this stack under the `monitoring` profile
+(off by default). Bring them up alongside the app with:
+
+```bash
+docker compose --profile monitoring up --build
+```
+
+Grafana opens at http://localhost:3001 (`admin`/`admin123`) with the Prometheus
+datasource and backend dashboard already provisioned. Profiles compose, so you can
+combine them: `docker compose --profile ollama --profile monitoring up --build`.
+See **[MONITORING.md](MONITORING.md)** for metrics and queries.
 
 ## Data & persistence
 

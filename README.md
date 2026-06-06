@@ -70,6 +70,18 @@ For native/desktop development, see **[INSTALL.md](INSTALL.md)**.
 - **Relationship Detection**: Auto-detects foreign keys and table relationships
 - **Column Type Awareness**: Full schema with data types, nullability, and constraints
 
+### 🔐 Provider-Trust Data Gating (PostgreSQL AI path)
+Keeps real row data away from hosted LLMs while still letting local models work freely:
+- **Trust derived from provider**: `ollama` → **local** (trusted), any cloud provider (OpenAI/Anthropic) → **hosted** (untrusted), with a UI override.
+- **Tool gating**: A registry tags each read-only tool `metadata` (always allowed) or `data` (local-trust only). On the hosted path, data tools are never selected or executed and their output never reaches the model.
+- **Restricted execution**: AI database access on the Postgres path routes through **Postgres MCP Pro** in-process — `SafeSqlDriver` (RESTRICTED, read-only + capped) for hosted models, plain `SqlDriver` for local — giving a structural read-only guarantee.
+- **Output sanitization & literal scrubbing**: Metadata tool outputs pass through sanitizers (`normalize_sql`, `drop_value_arrays`, `strip_query_text`); the schema is names-only, and both the user's question and the editor SQL are scrubbed of literal values before reaching a hosted model.
+
+### ⚙️ Runtime-Configurable LLM
+- **Switch provider/model/endpoint/key from the UI** — no `.env` edits or restart required.
+- Overrides persist to `llm_settings.json` and are overlaid onto settings at startup; every request builds a fresh client, so changes apply live.
+- Clickable LLM status badge opens a settings dialog with a **Test** button that populates the installed-model list, plus a **Data access** selector to override trust.
+
 ---
 
 ## 🏗️ Architecture
@@ -88,21 +100,28 @@ For native/desktop development, see **[INSTALL.md](INSTALL.md)**.
 ┌─────────────────────────────────────────────────────────┐
 │               FastAPI Backend (Python)                   │
 │  ┌──────────────────────────────────────────────────┐  │
-│  │  Routers: /datasources, /analyze, /ai-chat       │  │
+│  │  Routers: /datasources, /analyze, /ai-chat, /llm │  │
 │  ├──────────────────────────────────────────────────┤  │
-│  │  Services: Context Builder, AI Client, Advisors  │  │
+│  │  Services: Context Builder, AI Client, Advisors, │  │
+│  │            Tool Registry + Gated Context         │  │
 │  ├──────────────────────────────────────────────────┤  │
-│  │  Agents: PostgreSQL, MySQL, MongoDB, etc.        │  │
+│  │  Data path:                                      │  │
+│  │   • /analyze/* → native Agents (PG, MySQL, …)    │  │
+│  │   • Postgres AI chat → Postgres MCP Pro          │  │
+│  │       (Safe/RestrictedDriver gated by trust)     │  │
 │  └──────────────────────────────────────────────────┘  │
 └──────────────────────┬──────────────────────────────────┘
                        │
         ┌──────────────┴──────────────┐
         ▼                              ▼
-┌──────────────────┐          ┌──────────────────┐
-│ Multi-Databases  │          │  Ollama LLM      │
-│ (8 DB types)     │          │ + ChromaDB       │
-└──────────────────┘          └──────────────────┘
+┌──────────────────┐          ┌──────────────────────────┐
+│ Multi-Databases  │          │  LLM (configurable)      │
+│ (8 DB types)     │          │  Ollama / OpenAI /       │
+│                  │          │  Anthropic  + ChromaDB   │
+└──────────────────┘          └──────────────────────────┘
 ```
+
+> **Two data-access paths.** The non-AI `/analyze/*` endpoints use the native per-database agents. The PostgreSQL AI-chat/optimization path routes through **Postgres MCP Pro** with provider-trust gating, so hosted models get read-only, sanitized, names-only context while local models get full access. See [Provider-Trust Data Gating](#-provider-trust-data-gating-postgresql-ai-path).
 
 ---
 
@@ -240,26 +259,44 @@ AI: Generates CREATE TABLE with appropriate columns and types
 
 ## 🔧 Configuration
 
+### Configure from the UI (recommended)
+
+Click the **LLM status badge** in the app to open the settings dialog and switch
+provider / endpoint / model / API key at runtime. **Test** lists installed models,
+**Save** applies immediately (no restart). A **Data access** selector overrides the
+provider-trust default. Overrides persist to `llm_settings.json` and are overlaid
+onto the environment at startup.
+
 ### Environment Variables
 
-Create a `.env` file in the root directory:
+Alternatively, create a `.env` file in the root directory (see `.env.docker.example`):
 
 ```env
 # LLM Configuration
-LLM_PROVIDER=ollama
+LLM_PROVIDER=ollama                      # ollama | openai | anthropic
 LLM_MODEL=qwen2.5:7b-instruct
 LLM_ENDPOINT=http://127.0.0.1:11434
+LLM_API_KEY=                             # required for hosted providers
+
+# Provider-trust override for the Postgres AI data path
+# local = full data access, hosted = read-only sanitized metadata only.
+# Leave unset to derive automatically (ollama=local, else hosted).
+LLM_PROVIDER_TRUST=
+
+# Where UI overrides are persisted
+LLM_SETTINGS_FILE=llm_settings.json
 
 # Environment
 ENV=dev
 ```
 
-### Supported LLM Models
+### Supported LLM Providers & Models
 
-- `qwen2.5:7b-instruct` (default, recommended)
-- `llama3.1:8b`
-- `mistral:7b`
-- `codellama:7b`
+- **Ollama (local)** — `qwen2.5:7b-instruct` (default, recommended), `llama3.1:8b`, `mistral:7b`, `codellama:7b`
+- **OpenAI (hosted)** — e.g. `gpt-4o` (requires `LLM_API_KEY`)
+- **Anthropic (hosted)** — e.g. `claude-sonnet-4-6` (requires `LLM_API_KEY`)
+
+> Hosted providers are automatically treated as **untrusted** for the Postgres AI data path — they receive only sanitized, names-only, read-only context unless you override `LLM_PROVIDER_TRUST`.
 
 ---
 
@@ -269,7 +306,11 @@ ENV=dev
 
 **Service Layer:**
 - `context_builder.py`: Intelligent context generation with table relevance scoring
-- `ai_client.py`: LLM client wrapper for Ollama
+- `ai_client.py`: LLM client wrapper (Ollama / OpenAI / Anthropic)
+- `llm_settings.py`: Runtime LLM config persistence + `resolve_provider_trust()`
+- `tool_registry.py`: Read-only tool registry, trust-based gating + output sanitizers
+- `gated_context.py`: Builds sanitized, names-only context for hosted models
+- `postgres_mcp_executor.py`: In-process Postgres MCP Pro executor (Safe/Sql driver by trust)
 - `chat_history.py`: ChromaDB-based chat persistence with semantic search
 - `advisor.py`: Rule-based optimization recommendations
 - `super_agent.py`: AI suggestion orchestration
@@ -290,6 +331,8 @@ ENV=dev
 - `/ai-chat/chat` - Conversational AI assistant
 - `/ai-chat/validate-query` - Real-time query validation
 - `/chat-history/*` - Chat session management
+- `/llm/config` - Get/update runtime LLM settings (API key never returned)
+- `/llm/test` - Test connection and list installed models
 
 ### Frontend (React + Tauri)
 
@@ -308,9 +351,8 @@ ENV=dev
 ## 🧪 Testing
 
 ```bash
-# Backend tests
-cd .venv/app
-pytest
+# Backend tests (from repo root)
+python -m pytest backend/tests
 
 # Frontend tests
 cd tauri-app
@@ -408,13 +450,17 @@ Results:
 
 ```
 ai-db-advisor/
-├── .venv/app/              # FastAPI Backend
-│   ├── routers/            # API endpoints
+├── backend/                # FastAPI Backend
+│   ├── routers/            # API endpoints (datasources, analyze, ai_chat, llm, …)
 │   ├── services/           # Business logic
 │   │   ├── context_builder.py
 │   │   ├── ai_client.py
+│   │   ├── llm_settings.py
+│   │   ├── tool_registry.py
+│   │   ├── gated_context.py
+│   │   ├── postgres_mcp_executor.py
 │   │   └── chat_history.py
-│   ├── agents/             # Database agents
+│   ├── tests/              # Pytest suite
 │   └── utils/              # Helpers
 │
 ├── tauri-app/              # Tauri Desktop App
@@ -478,14 +524,19 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🗺️ Roadmap
 
+**Recently shipped**
+- [x] Multiple LLM providers (Ollama, OpenAI, Anthropic) with runtime UI configuration
+- [x] Provider-trust data gating via Postgres MCP Pro restricted mode (PostgreSQL AI path)
+- [x] One-command Docker deployment (backend + web UI)
+
+**Planned**
+- [ ] Extend provider-trust gating beyond PostgreSQL to the other engines
 - [ ] Support for additional databases (Elasticsearch, Neo4j)
 - [ ] Query execution history and favorites
 - [ ] Export optimization reports
 - [ ] Database migration suggestions
 - [ ] Multi-language support
-- [ ] Cloud deployment options
 - [ ] Performance benchmarking
-- [ ] Automated testing suite
 - [ ] Dark mode UI
 
 ---

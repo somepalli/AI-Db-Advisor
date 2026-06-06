@@ -15,7 +15,7 @@ from ..deps import resolve_agent
 from ..services.ai_client import LLMClient
 from ..services.context_builder import build_ai_context
 from ..services.gated_context import build_gated_context
-from ..services.tool_registry import scrub_literals
+from ..services.tool_registry import scrub_literals, normalize_sql
 from ..services.llm_settings import resolve_provider_trust
 
 logger = logging.getLogger(__name__)
@@ -116,7 +116,13 @@ Respond in a natural, conversational tone. You can think out loud as you work th
 
         user_content_parts = []
         if current_sql:
-            user_content_parts.append(f"Current SQL in editor:\n```sql\n{current_sql}\n```\n")
+            # Literals in the editor SQL are an egress channel too: scrub them for hosted
+            # Postgres models the same way the NL question is scrubbed above.
+            safe_sql = (
+                normalize_sql(current_sql)
+                if (engine == "postgres" and trust == "hosted") else current_sql
+            )
+            user_content_parts.append(f"Current SQL in editor:\n```sql\n{safe_sql}\n```\n")
         # safe_message == message for local trust; literals scrubbed for hosted models.
         user_content_parts.append(f"User request: {safe_message}")
 

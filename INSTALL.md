@@ -85,8 +85,15 @@ in `.env`.
 
 ## 5. Optional: monitoring stack
 
-Prometheus/Grafana dashboards and alerting live under `monitoring/`. See
-`monitoring/` and `start_monitoring.bat` (Windows) / `docker-compose.monitoring.yml`.
+Prometheus/Grafana dashboards and alerting live under `monitoring/` and are part of
+the main Docker stack under the `monitoring` profile:
+
+```bash
+docker compose --profile monitoring up --build
+```
+
+Grafana opens at http://localhost:3001 (`admin`/`admin123`), auto-provisioned. See
+**[MONITORING.md](MONITORING.md)** for details.
 
 ## Troubleshooting
 
