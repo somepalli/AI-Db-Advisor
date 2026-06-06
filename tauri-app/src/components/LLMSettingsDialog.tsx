@@ -18,6 +18,8 @@ import {
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Button } from './ui/button';
+import { SiOllama, SiOpenai, SiAnthropic } from 'react-icons/si';
+import type { IconType } from 'react-icons';
 
 interface Props {
   open: boolean;
@@ -26,10 +28,17 @@ interface Props {
   onSaved?: () => void;
 }
 
-const PROVIDERS = [
-  { value: 'ollama', label: 'Ollama (local)' },
-  { value: 'openai', label: 'OpenAI-compatible' },
-  { value: 'anthropic', label: 'Anthropic (Claude)' },
+interface ProviderDef {
+  value: string;
+  label: string;
+  Logo: IconType;
+  color: string;
+}
+
+const PROVIDERS: ProviderDef[] = [
+  { value: 'ollama', label: 'Ollama', Logo: SiOllama, color: '#000000' },
+  { value: 'openai', label: 'OpenAI', Logo: SiOpenai, color: '#412991' },
+  { value: 'anthropic', label: 'Anthropic', Logo: SiAnthropic, color: '#D97757' },
 ];
 
 const ENDPOINT_HINTS: Record<string, string> = {
@@ -37,6 +46,16 @@ const ENDPOINT_HINTS: Record<string, string> = {
   openai: 'https://api.openai.com/v1',
   anthropic: 'https://api.anthropic.com/v1',
 };
+
+// Suggested models per provider for the dropdown. The model field stays editable,
+// so users can type any model not listed here.
+const MODELS: Record<string, string[]> = {
+  ollama: ['qwen2.5:7b-instruct', 'llama3.1:8b', 'mistral:7b', 'codellama:7b'],
+  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'o3', 'o4-mini'],
+  anthropic: ['claude-opus-4-8', 'claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+};
+
+const ALL_KNOWN_MODELS = new Set(Object.values(MODELS).flat());
 
 /**
  * Lets the user point the app at a different LLM (provider / endpoint / model / API key)
@@ -85,6 +104,26 @@ export function LLMSettingsDialog({ open, onOpenChange, onSaved }: Props) {
     provider_trust: trustOverride, // "" = auto
   });
 
+  // Switching provider via a logo tile: default the endpoint, and swap the model
+  // to that provider's default if the current one belongs to a different provider.
+  const selectProvider = (value: string) => {
+    setProvider(value);
+    setProbe(null);
+    if (!endpoint || Object.values(ENDPOINT_HINTS).includes(endpoint)) {
+      setEndpoint(ENDPOINT_HINTS[value] || '');
+    }
+    const belongsToOtherProvider =
+      ALL_KNOWN_MODELS.has(model) && !(MODELS[value] || []).includes(model);
+    if (!model || belongsToOtherProvider) {
+      setModel((MODELS[value] || [])[0] ?? '');
+    }
+  };
+
+  // Provider-specific suggestions + any models discovered via Test (Ollama).
+  const modelOptions = Array.from(
+    new Set([...(MODELS[provider] || []), ...(probe?.models || [])])
+  );
+
   const handleTest = async () => {
     setBusy('test');
     setError(null);
@@ -125,28 +164,26 @@ export function LLMSettingsDialog({ open, onOpenChange, onSaved }: Props) {
 
         <div className="grid gap-4 py-2">
           <div className="grid gap-1.5">
-            <Label htmlFor="llm-provider">Provider</Label>
-            <Select
-              value={provider}
-              onValueChange={(v) => {
-                setProvider(v);
-                // Offer a sensible default endpoint when switching providers.
-                if (!endpoint || Object.values(ENDPOINT_HINTS).includes(endpoint)) {
-                  setEndpoint(ENDPOINT_HINTS[v] || '');
-                }
-              }}
-            >
-              <SelectTrigger id="llm-provider">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PROVIDERS.map((p) => (
-                  <SelectItem key={p.value} value={p.value}>
-                    {p.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label>Provider</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {PROVIDERS.map((p) => {
+                const active = provider === p.value;
+                return (
+                  <button
+                    key={p.value}
+                    type="button"
+                    onClick={() => selectProvider(p.value)}
+                    title={p.label}
+                    className={`flex flex-col items-center justify-center gap-1.5 rounded-md border p-3 h-20 transition-colors ${
+                      active ? 'border-primary border-2 bg-primary/5' : 'border-border hover:bg-accent'
+                    }`}
+                  >
+                    <p.Logo size={26} color={p.color} className="dark:invert" />
+                    <span className="text-xs">{p.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="grid gap-1.5">
@@ -165,15 +202,19 @@ export function LLMSettingsDialog({ open, onOpenChange, onSaved }: Props) {
               id="llm-model"
               value={model}
               list="llm-model-options"
-              placeholder="e.g. qwen2.5:7b-instruct"
+              placeholder={`e.g. ${(MODELS[provider] || [])[0] ?? 'model name'}`}
               onChange={(e) => setModel(e.target.value)}
             />
-            {/* Populated from a successful Test so users can pick an installed model. */}
+            {/* Provider-specific suggestions (+ installed Ollama models from Test).
+                The field stays editable — type any model not listed here. */}
             <datalist id="llm-model-options">
-              {(probe?.models || []).map((m) => (
+              {modelOptions.map((m) => (
                 <option key={m} value={m} />
               ))}
             </datalist>
+            <p className="text-xs text-muted-foreground">
+              Pick a {PROVIDERS.find((p) => p.value === provider)?.label} model, or type your own.
+            </p>
           </div>
 
           {needsKey && (

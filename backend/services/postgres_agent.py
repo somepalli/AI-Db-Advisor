@@ -56,6 +56,117 @@ class PostgresAgent(BaseAgent):
             )
         return {"tables": schema}
 
+    def get_database_objects(self) -> Dict[str, Any]:
+        """pgAdmin-style object inventory: tables/views (with columns + PK flag),
+        sequences, functions/procedures, and triggers — grouped as schema.name."""
+        cols_sql = """
+        select t.table_schema, t.table_name, t.table_type,
+               c.column_name, c.data_type, c.is_nullable,
+               (pk.column_name is not null) as is_pk
+        from information_schema.tables t
+        join information_schema.columns c
+          on c.table_schema = t.table_schema and c.table_name = t.table_name
+        left join (
+            select kcu.table_schema, kcu.table_name, kcu.column_name
+            from information_schema.table_constraints tc
+            join information_schema.key_column_usage kcu
+              on tc.constraint_name = kcu.constraint_name
+             and tc.table_schema = kcu.table_schema
+            where tc.constraint_type = 'PRIMARY KEY'
+        ) pk on pk.table_schema = c.table_schema
+            and pk.table_name = c.table_name
+            and pk.column_name = c.column_name
+        where t.table_schema not in ('pg_catalog','information_schema')
+        order by t.table_schema, t.table_name, c.ordinal_position;
+        """
+        seq_sql = """
+        select sequence_schema, sequence_name
+        from information_schema.sequences
+        where sequence_schema not in ('pg_catalog','information_schema')
+        order by sequence_schema, sequence_name;
+        """
+        fn_sql = """
+        select n.nspname as schema, p.proname as name,
+               case p.prokind when 'p' then 'procedure'
+                              when 'a' then 'aggregate'
+                              when 'w' then 'window'
+                              else 'function' end as kind,
+               pg_catalog.pg_get_function_result(p.oid) as returns,
+               pg_catalog.pg_get_function_arguments(p.oid) as arguments
+        from pg_catalog.pg_proc p
+        join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+        where n.nspname not in ('pg_catalog','information_schema')
+        order by n.nspname, p.proname;
+        """
+        trg_sql = """
+        select trigger_schema, trigger_name, event_object_table,
+               action_timing,
+               string_agg(event_manipulation, ', ' order by event_manipulation) as events
+        from information_schema.triggers
+        where trigger_schema not in ('pg_catalog','information_schema')
+        group by trigger_schema, trigger_name, event_object_table, action_timing
+        order by trigger_schema, trigger_name;
+        """
+
+        tables: Dict[str, Any] = {}
+        views: Dict[str, Any] = {}
+        sequences: List[str] = []
+        functions: List[Dict[str, Any]] = []
+        triggers: List[Dict[str, Any]] = []
+
+        with self._conn() as c, c.cursor() as cur:
+            cur.execute("select current_database() as db;")
+            db_name = cur.fetchone()["db"]
+
+            cur.execute(cols_sql)
+            for r in cur.fetchall():
+                key = f"{r['table_schema']}.{r['table_name']}"
+                target = views if r["table_type"] == "VIEW" else tables
+                target.setdefault(key, []).append({
+                    "column": r["column_name"],
+                    "type": r["data_type"],
+                    "nullable": r["is_nullable"],
+                    "pk": r["is_pk"],
+                })
+
+            # Secondary catalogs are best-effort; never fail the whole tree.
+            try:
+                cur.execute(seq_sql)
+                sequences = [f"{r['sequence_schema']}.{r['sequence_name']}" for r in cur.fetchall()]
+            except Exception as e:
+                logger.warning("Failed to list sequences: %s", e)
+
+            try:
+                cur.execute(fn_sql)
+                functions = [{
+                    "name": f"{r['schema']}.{r['name']}",
+                    "kind": r["kind"],
+                    "returns": r["returns"],
+                    "arguments": r["arguments"],
+                } for r in cur.fetchall()]
+            except Exception as e:
+                logger.warning("Failed to list functions: %s", e)
+
+            try:
+                cur.execute(trg_sql)
+                triggers = [{
+                    "name": f"{r['trigger_schema']}.{r['trigger_name']}",
+                    "table": r["event_object_table"],
+                    "timing": r["action_timing"],
+                    "events": r["events"],
+                } for r in cur.fetchall()]
+            except Exception as e:
+                logger.warning("Failed to list triggers: %s", e)
+
+        return {
+            "database": db_name,
+            "tables": tables,
+            "views": views,
+            "sequences": sequences,
+            "functions": functions,
+            "triggers": triggers,
+        }
+
     def get_top_queries(self, limit: int = 20, window_minutes: int = 60) -> List[Dict[str, Any]]:
         with self._conn() as c, c.cursor() as cur:
             try:

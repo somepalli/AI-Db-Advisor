@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Database } from 'lucide-react';
 import { ConnectionPanel } from './components/ConnectionPanel';
-import { DBExplorer } from './components/DBExplorer';
 import { SQLEditorWithAutocomplete } from './components/SQLEditorWithAutocomplete';
 import { AIAssistant } from './components/AIAssistant';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
@@ -9,6 +8,7 @@ import AlertPanel from './components/AlertPanel';
 import { AlertRulesPanel } from './components/AlertRulesPanel';
 import { Separator } from './components/ui/separator';
 import { LLMStatusBadge } from './components/LLMStatusBadge';
+import { OptimizationProvider } from './lib/optimizationContext';
 import { datasourcesApi, type DataSource } from './api/client';
 
 type ViewType = 'query' | 'analytics' | 'alerts';
@@ -53,6 +53,7 @@ function App() {
   };
 
   return (
+    <OptimizationProvider>
     <div className="h-screen flex flex-col bg-background text-foreground">
       {/* Header */}
       <header className="h-14 border-b border-border bg-card px-6 flex items-center justify-between">
@@ -114,8 +115,8 @@ function App() {
         </div>
       ) : currentView === 'query' ? (
         <div className="flex-1 flex overflow-hidden">
-          {/* Column 1: Connection Manager */}
-          <div className="w-80 border-r border-border flex flex-col bg-card">
+          {/* Column 1: Object Explorer (connections + nested schema tree) */}
+          <div className="w-96 border-r border-border flex flex-col bg-card">
             <ConnectionPanel
               onSelectDataSource={handleSelectDataSource}
               selectedDataSource={selectedDataSource}
@@ -124,14 +125,7 @@ function App() {
 
           <Separator orientation="vertical" />
 
-          {/* Column 2: Database Explorer */}
-          <div className="w-80 border-r border-border flex flex-col bg-card">
-            <DBExplorer dataSourceId={selectedDataSource ?? ''} />
-          </div>
-
-          <Separator orientation="vertical" />
-
-          {/* Column 3: SQL Editor */}
+          {/* Column 2: SQL Editor */}
           <div className="flex-1 flex flex-col bg-background">
             {selectedDataSource ? (
               <SQLEditorWithAutocomplete dataSourceId={selectedDataSource} />
@@ -151,7 +145,7 @@ function App() {
           <Separator orientation="vertical" />
 
           {/* Column 4: AI Assistant */}
-          <div className="w-96 border-l border-border flex flex-col bg-card">
+          <div className="w-[34rem] border-l border-border flex flex-col bg-card">
             <AIAssistant dataSourceId={selectedDataSource} />
           </div>
         </div>
@@ -253,6 +247,7 @@ function App() {
         </div>
       )}
     </div>
+    </OptimizationProvider>
   );
 }
 

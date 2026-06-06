@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { datasourcesApi, analyzeApi } from '../api/client';
 import { connectionStore } from '../utils/store';
-import type { DataSource, DataSourceCreate, Lock, Stats, TopQuery } from '../types';
+import type { DataSource, Lock, Stats, TopQuery } from '../types';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -9,8 +9,16 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from './ui/dialog';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from './ui/select';
-import { Database, Plus, Trash2, RefreshCw } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Plus, Trash2, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
+import {
+  FEATURED_ENGINES,
+  OTHER_ENGINES,
+  getEngineDef,
+  initialValues,
+  EngineLogo,
+} from '../lib/dbEngines';
+import { DBExplorer } from './DBExplorer';
 
 interface Props {
   onSelectDataSource: (dsId: string) => void;
@@ -25,36 +33,36 @@ export function ConnectionPanel({ onSelectDataSource, selectedDataSource }: Prop
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState<DataSourceCreate>({
-    id: '',
-    engine: 'postgres',
-    dsn: '',
-  });
+  // Which connections are expanded to reveal their schema tree (pgAdmin-style).
+  const [expandedConns, setExpandedConns] = useState<Set<string>>(new Set());
+  // Structured connection form: pick an engine, then fill host/port/etc. — the
+  // DSN is assembled from these fields so users never type a raw connection string.
+  const [engine, setEngine] = useState('postgres');
+  const [connId, setConnId] = useState('');
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>(initialValues('postgres'));
 
-  const getDSNPlaceholder = () => {
-    switch (formData.engine) {
-      case 'postgres':
-        return 'postgresql://user:pass@host:5432/db';
-      case 'mysql':
-      case 'mariadb':
-        return 'mysql://user:pass@host:3306/db';
-      case 'sqlserver':
-      case 'mssql':
-        return 'mssql://user:pass@host:1433/db';
-      case 'clickhouse':
-        return 'clickhouse://user:pass@host:8123/db';
-      case 'mongodb':
-      case 'mongo':
-        return 'mongodb://user:pass@host:27017/db';
-      case 'oracle':
-        return 'oracle://user:pass@host:1521/service';
-      case 'redis':
-        return 'redis://host:6379/0';
-      case 'sqlite':
-        return 'sqlite:///path/to/database.db';
-      default:
-        return 'database://user:pass@host:port/db';
-    }
+  const selectEngine = (value: string) => {
+    setEngine(value);
+    setFieldValues(initialValues(value));
+  };
+
+  const resetForm = () => {
+    setEngine('postgres');
+    setConnId('');
+    setFieldValues(initialValues('postgres'));
+  };
+
+  const toggleConn = (id: string) =>
+    setExpandedConns((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  // Selecting a connection also expands it to reveal its schema tree.
+  const handleConnClick = (id: string) => {
+    onSelectDataSource(id);
+    setExpandedConns((prev) => new Set(prev).add(id));
   };
 
   // Dashboard data
@@ -123,16 +131,18 @@ export function ConnectionPanel({ onSelectDataSource, selectedDataSource }: Prop
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const def = getEngineDef(engine);
+    if (!def) {
+      setError(`Unsupported engine: ${engine}`);
+      return;
+    }
+    const dsn = def.buildDsn(fieldValues);
     try {
-      await datasourcesApi.create(formData);
-      await connectionStore.save({
-        id: formData.id,
-        engine: formData.engine,
-        dsn: formData.dsn,
-      });
+      await datasourcesApi.create({ id: connId, engine: def.value, dsn });
+      await connectionStore.save({ id: connId, engine: def.value, dsn });
 
       setShowForm(false);
-      setFormData({ id: '', engine: 'postgres', dsn: '' });
+      resetForm();
       loadDataSources();
     } catch (err) {
       setError('Failed to create data source: ' + (err as Error).message);
@@ -174,6 +184,9 @@ export function ConnectionPanel({ onSelectDataSource, selectedDataSource }: Prop
     return <div className="p-4 text-sm text-muted-foreground">Loading...</div>;
   }
 
+  const currentDef = getEngineDef(engine);
+  const isOther = OTHER_ENGINES.some((e) => e.value === engine);
+
   return (
     <div className="h-full flex flex-col">
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as Tab)} className="flex-1 flex flex-col">
@@ -194,7 +207,13 @@ export function ConnectionPanel({ onSelectDataSource, selectedDataSource }: Prop
           <TabsContent value="connections" className="mt-0">
             <div className="flex justify-between items-center mb-3">
               <h4 className="text-sm font-semibold">Data Sources</h4>
-              <Dialog open={showForm} onOpenChange={setShowForm}>
+              <Dialog
+                open={showForm}
+                onOpenChange={(open) => {
+                  setShowForm(open);
+                  if (!open) resetForm();
+                }}
+              >
                 <DialogTrigger asChild>
                   <Button size="sm" className="text-xs h-7">
                     <Plus className="h-3 w-3" />
@@ -207,57 +226,110 @@ export function ConnectionPanel({ onSelectDataSource, selectedDataSource }: Prop
                   </DialogHeader>
                   <form onSubmit={handleSubmit}>
                     <div className="space-y-3">
+                      {/* Engine picker: top-5 logos + an "Other" tile that reveals a dropdown */}
                       <div>
-                        <Label htmlFor="id" className="text-xs">ID</Label>
+                        <Label className="text-xs">Database</Label>
+                        <div className="grid grid-cols-3 gap-2 mt-1">
+                          {FEATURED_ENGINES.map((eng) => {
+                            const active = engine === eng.value;
+                            return (
+                              <button
+                                key={eng.value}
+                                type="button"
+                                onClick={() => selectEngine(eng.value)}
+                                title={eng.label}
+                                className={`flex flex-col items-center justify-center gap-1 rounded-md border p-2 h-16 transition-colors ${
+                                  active
+                                    ? 'border-primary border-2 bg-primary/5'
+                                    : 'border-border hover:bg-accent'
+                                }`}
+                              >
+                                <EngineLogo engine={eng.value} size={22} />
+                                <span className="text-[10px] leading-tight text-center">
+                                  {eng.label}
+                                </span>
+                              </button>
+                            );
+                          })}
+                          {/* "Other" tile */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!isOther) selectEngine(OTHER_ENGINES[0].value);
+                            }}
+                            title="Other databases"
+                            className={`flex flex-col items-center justify-center gap-1 rounded-md border p-2 h-16 transition-colors ${
+                              isOther
+                                ? 'border-primary border-2 bg-primary/5'
+                                : 'border-border hover:bg-accent'
+                            }`}
+                          >
+                            {isOther ? (
+                              <EngineLogo engine={engine} size={22} />
+                            ) : (
+                              <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                            )}
+                            <span className="text-[10px] leading-tight text-center">
+                              {isOther ? currentDef?.label : 'Other'}
+                            </span>
+                          </button>
+                        </div>
+
+                        {isOther && (
+                          <Select value={engine} onValueChange={selectEngine}>
+                            <SelectTrigger className="text-xs h-8 mt-2">
+                              <SelectValue placeholder="Select database" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {OTHER_ENGINES.map((eng) => (
+                                <SelectItem key={eng.value} value={eng.value} className="text-xs">
+                                  {eng.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+
+                      {/* Connection name */}
+                      <div>
+                        <Label htmlFor="conn-id" className="text-xs">Connection name</Label>
                         <Input
-                          id="id"
+                          id="conn-id"
                           type="text"
-                          value={formData.id}
-                          onChange={(e) => setFormData({ ...formData, id: e.target.value })}
-                          placeholder="my-db"
+                          value={connId}
+                          onChange={(e) => setConnId(e.target.value)}
+                          placeholder={`my-${currentDef?.value ?? 'db'}`}
                           required
                           className="text-xs h-8"
                         />
                       </div>
-                      <div>
-                        <Label htmlFor="engine" className="text-xs">Engine</Label>
-                        <Select value={formData.engine} onValueChange={(value) => setFormData({ ...formData, engine: value })}>
-                          <SelectTrigger className="text-xs h-8">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              <SelectLabel>SQL Databases</SelectLabel>
-                              <SelectItem value="postgres">PostgreSQL</SelectItem>
-                              <SelectItem value="mysql">MySQL / MariaDB</SelectItem>
-                              <SelectItem value="sqlserver">Microsoft SQL Server</SelectItem>
-                              <SelectItem value="oracle">Oracle Database</SelectItem>
-                              <SelectItem value="clickhouse">ClickHouse</SelectItem>
-                            </SelectGroup>
-                            <SelectGroup>
-                              <SelectLabel>NoSQL Databases</SelectLabel>
-                              <SelectItem value="mongodb">MongoDB</SelectItem>
-                              <SelectItem value="redis">Redis</SelectItem>
-                              <SelectItem value="cassandra">Cassandra</SelectItem>
-                            </SelectGroup>
-                            <SelectGroup>
-                              <SelectLabel>Other</SelectLabel>
-                              <SelectItem value="sqlite">SQLite</SelectItem>
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label htmlFor="dsn" className="text-xs">DSN</Label>
-                        <Input
-                          id="dsn"
-                          type="text"
-                          value={formData.dsn}
-                          onChange={(e) => setFormData({ ...formData, dsn: e.target.value })}
-                          placeholder={getDSNPlaceholder()}
-                          required
-                          className="text-xs h-8"
-                        />
+
+                      {/* Engine-specific credential fields */}
+                      <div className="grid grid-cols-2 gap-2">
+                        {currentDef?.fields.map((field) => {
+                          const fullWidth = field.key === 'file' || field.key === 'database';
+                          return (
+                            <div key={field.key} className={fullWidth ? 'col-span-2' : ''}>
+                              <Label htmlFor={`f-${field.key}`} className="text-xs">
+                                {field.label}
+                                {field.required && <span className="text-destructive"> *</span>}
+                              </Label>
+                              <Input
+                                id={`f-${field.key}`}
+                                type={field.type ?? 'text'}
+                                value={fieldValues[field.key] ?? ''}
+                                onChange={(e) =>
+                                  setFieldValues({ ...fieldValues, [field.key]: e.target.value })
+                                }
+                                placeholder={field.placeholder}
+                                required={field.required}
+                                autoComplete="off"
+                                className="text-xs h-8"
+                              />
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                     <DialogFooter>
@@ -268,46 +340,69 @@ export function ConnectionPanel({ onSelectDataSource, selectedDataSource }: Prop
               </Dialog>
             </div>
 
-            <div className="flex flex-col gap-2">
+            {/* pgAdmin-style object explorer: each data source is a node whose
+                schema tree expands directly beneath it. */}
+            <div className="flex flex-col">
               {Object.keys(dataSources).length === 0 ? (
                 <div className="text-center p-5 text-muted-foreground text-xs">
                   No connections
                 </div>
               ) : (
-                Object.entries(dataSources).map(([id, ds]) => (
-                  <Card
-                    key={id}
-                    className={`cursor-pointer transition-colors ${
-                      selectedDataSource === id ? 'border-primary border-2 bg-primary/5' : ''
-                    }`}
-                    onClick={() => onSelectDataSource(id)}
-                  >
-                    <CardContent className="p-3 flex justify-between items-center">
-                      <div className="flex items-center gap-2 flex-1">
-                        <Database className="h-4 w-4 text-muted-foreground" />
-                        <div>
-                          <div className="text-sm font-semibold">{id}</div>
-                          <div className="text-xs text-muted-foreground">{ds.engine}</div>
-                        </div>
-                        {selectedDataSource === id && (
-                          <Badge variant="default" className="ml-2 text-xs">
-                            <div className="w-2 h-2 bg-green-500 rounded-full mr-1"></div>
-                            Connected
-                          </Badge>
-                        )}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={(e) => handleDelete(id, e)}
-                        title={`Delete ${id}`}
+                Object.entries(dataSources).map(([id, ds]) => {
+                  const expanded = expandedConns.has(id);
+                  const selected = selectedDataSource === id;
+                  return (
+                    <div key={id}>
+                      <div
+                        onClick={() => handleConnClick(id)}
+                        className={`group flex items-center gap-1.5 px-1.5 py-1.5 rounded cursor-pointer select-none transition-colors ${
+                          selected ? 'bg-primary/10' : 'hover:bg-accent'
+                        }`}
                       >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleConn(id);
+                          }}
+                          className="shrink-0"
+                          title={expanded ? 'Collapse' : 'Expand'}
+                        >
+                          <ChevronRight
+                            className={`h-4 w-4 text-muted-foreground transition-transform ${
+                              expanded ? 'rotate-90' : ''
+                            }`}
+                          />
+                        </button>
+                        <EngineLogo engine={ds.engine} size={18} />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-semibold truncate">{id}</div>
+                          <div className="text-[10px] text-muted-foreground truncate">
+                            {getEngineDef(ds.engine)?.label ?? ds.engine}
+                          </div>
+                        </div>
+                        {selected && (
+                          <span className="w-2 h-2 bg-green-500 rounded-full shrink-0" title="Connected" />
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                          onClick={(e) => handleDelete(id, e)}
+                          title={`Delete ${id}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
+                      </div>
+
+                      {expanded && (
+                        <div className="ml-3 pl-1 border-l border-border">
+                          <DBExplorer dataSourceId={id} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           </TabsContent>

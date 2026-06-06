@@ -19,6 +19,24 @@ class BaseAgent:
         """Get database schema (tables, columns, types)"""
         raise NotImplementedError
 
+    def get_database_objects(self) -> Dict[str, Any]:
+        """
+        Get a pgAdmin-style inventory of database objects for the schema tree:
+        tables (with columns), views, sequences, functions/procedures, triggers.
+
+        Default implementation derives tables from get_schema(); engines that
+        support richer catalogs (e.g. PostgreSQL) override this.
+        """
+        schema = self.get_schema()
+        return {
+            "database": self.get_db_type(),
+            "tables": schema.get("tables", {}),
+            "views": {},
+            "sequences": [],
+            "functions": [],
+            "triggers": [],
+        }
+
     def get_top_queries(self, limit: int = 20, window_minutes: int = 60) -> List[Dict[str, Any]]:
         """Get top queries by execution time"""
         raise NotImplementedError
