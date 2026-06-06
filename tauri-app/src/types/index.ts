@@ -15,10 +15,34 @@ export interface TableSchema {
   column: string;
   type: string;
   nullable: string;
+  pk?: boolean;
 }
 
 export interface SchemaResponse {
   tables: Record<string, TableSchema[]>;
+}
+
+export interface DbFunction {
+  name: string;
+  kind: string; // function | procedure | aggregate | window
+  returns?: string;
+  arguments?: string;
+}
+
+export interface DbTrigger {
+  name: string;
+  table: string;
+  timing?: string; // BEFORE | AFTER | INSTEAD OF
+  events?: string; // INSERT, UPDATE, ...
+}
+
+export interface DatabaseObjects {
+  database: string;
+  tables: Record<string, TableSchema[]>;
+  views: Record<string, TableSchema[]>;
+  sequences: string[];
+  functions: DbFunction[];
+  triggers: DbTrigger[];
 }
 
 export interface TopQuery {

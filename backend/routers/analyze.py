@@ -15,6 +15,12 @@ def get_schema(ds_id: str):
     agent = resolve_agent(ds_id)
     return agent.get_schema()
 
+@router.get("/{ds_id}/objects")
+def get_objects(ds_id: str):
+    """pgAdmin-style object tree: tables, views, sequences, functions, triggers."""
+    agent = resolve_agent(ds_id)
+    return agent.get_database_objects()
+
 @router.get("/{ds_id}/top")
 def top_queries(ds_id: str, limit: int = Query(20, ge=1, le=100)):
     agent = resolve_agent(ds_id)

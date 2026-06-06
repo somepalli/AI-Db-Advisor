@@ -3,6 +3,7 @@ import type {
   DataSource,
   DataSourceCreate,
   SchemaResponse,
+  DatabaseObjects,
   TopQuery,
   Lock,
   Stats,
@@ -145,6 +146,10 @@ export const datasourcesApi = {
 export const analyzeApi = {
   getSchema: async (dsId: string): Promise<SchemaResponse> => {
     return apiRequest<SchemaResponse>(`/analyze/${dsId}/schema`);
+  },
+
+  getObjects: async (dsId: string): Promise<DatabaseObjects> => {
+    return apiRequest<DatabaseObjects>(`/analyze/${dsId}/objects`);
   },
 
   getTopQueries: async (dsId: string, limit: number = 10): Promise<TopQuery[]> => {

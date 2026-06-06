@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { Sparkles, Send, Loader2, Copy, Code } from 'lucide-react';
+import { Sparkles, Send, Loader2, Copy, Code, Database, Zap, X, RefreshCw } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Card, CardContent } from './ui/card';
 import { Badge } from './ui/badge';
-import { aiChatApi, chatHistoryApi, type ChatMessage } from '../api/client';
+import { aiChatApi, chatHistoryApi, optimizationApi, type ChatMessage } from '../api/client';
 import { MessageRenderer } from './MessageRenderer';
 import { ChatHistoryDropdown } from './ChatHistoryDropdown';
+import { useOptimization } from '../lib/optimizationContext';
 
 interface Props {
   dataSourceId: string | null;
@@ -31,6 +32,63 @@ export function AIAssistant({ dataSourceId }: Props) {
   const [sessionId, setSessionId] = useState(() => `session_${Date.now()}`);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Optimization results pushed from the schema explorer (Optimize DB / Table)
+  const {
+    result: optResult,
+    loading: optLoading,
+    setResult: setOptResult,
+    requestRefresh,
+  } = useOptimization();
+  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
+  const [applyLoading, setApplyLoading] = useState(false);
+  const [applyResults, setApplyResults] = useState<any>(null);
+
+  // Reset selection/results whenever a new optimization result arrives.
+  useEffect(() => {
+    setSelectedSuggestions(new Set());
+    setApplyResults(null);
+  }, [optResult]);
+
+  const toggleSuggestion = (id: string) =>
+    setSelectedSuggestions((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const handleApplySelected = async () => {
+    if (!optResult) return;
+    const suggestions = optResult.data.suggestions || [];
+    const sqlStatements = suggestions
+      .filter((s: any) => selectedSuggestions.has(s.id) && s.executable && s.sql)
+      .map((s: any) => s.sql);
+    if (sqlStatements.length === 0) return;
+    if (
+      !confirm(
+        `Apply ${sqlStatements.length} optimization(s)? This will execute SQL on your database.`
+      )
+    ) {
+      return;
+    }
+    try {
+      setApplyLoading(true);
+      const r = await optimizationApi.applyOptimizations(optResult.dsId, sqlStatements);
+      setApplyResults(r);
+      // Reload the matching schema explorer so applied indexes/changes show up.
+      if (r.success_count > 0) {
+        requestRefresh(optResult.dsId);
+      }
+    } catch (err) {
+      setApplyResults({
+        success_count: 0,
+        error_count: 1,
+        results: [{ status: 'error', message: (err as Error).message, sql: '' }],
+      });
+    } finally {
+      setApplyLoading(false);
+    }
+  };
 
   useEffect(() => {
     // Auto-scroll to bottom when new messages arrive
@@ -189,6 +247,161 @@ export function AIAssistant({ dataSourceId }: Props) {
           Ask questions about your database
         </p>
       </div>
+
+      {/* Optimization results (pushed from the schema explorer) */}
+      {(optLoading || optResult) && (
+        <div className="border-b border-border bg-primary/5 max-h-[45%] overflow-y-auto p-3">
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-sm font-semibold text-primary flex items-center gap-2">
+              {optResult?.type === 'table' ? (
+                <Zap className="h-4 w-4" />
+              ) : (
+                <Database className="h-4 w-4" />
+              )}
+              {optResult?.type === 'table' ? 'Table Optimization' : 'Database Optimization'}
+            </h3>
+            {!optLoading && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => setOptResult(null)}
+                title="Dismiss"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+
+          {optLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground py-3">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Generating optimization suggestions...
+            </div>
+          ) : optResult ? (
+            <>
+              <div className="text-xs text-muted-foreground mb-2">
+                {optResult.type === 'database'
+                  ? `Tables: ${optResult.data.table_count} | Indexes: ${optResult.data.index_count}`
+                  : `Table: ${optResult.data.table} | Columns: ${optResult.data.column_count} | Indexes: ${optResult.data.index_count}`}
+              </div>
+              <div className="space-y-2">
+                {optResult.data.suggestions?.map((s: any) => {
+                  const sev =
+                    s.severity === 'high'
+                      ? 'border-l-destructive'
+                      : s.severity === 'medium'
+                      ? 'border-l-warning'
+                      : 'border-l-primary';
+                  return (
+                    <Card key={s.id} className={`border-l-4 ${sev}`}>
+                      <CardContent className="p-3 flex gap-3 items-start">
+                        {s.executable && (
+                          <input
+                            type="checkbox"
+                            checked={selectedSuggestions.has(s.id)}
+                            onChange={() => toggleSuggestion(s.id)}
+                            className="mt-1"
+                          />
+                        )}
+                        <div className="flex-1 space-y-2 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-semibold">
+                              {s.category?.toUpperCase()}: {s.summary}
+                            </span>
+                            {s.severity && (
+                              <Badge
+                                variant={
+                                  s.severity === 'high'
+                                    ? 'destructive'
+                                    : s.severity === 'medium'
+                                    ? 'warning'
+                                    : 'default'
+                                }
+                                className="text-xs"
+                              >
+                                {s.severity}
+                              </Badge>
+                            )}
+                          </div>
+                          {s.details && (
+                            <div className="text-xs text-muted-foreground whitespace-pre-wrap">
+                              {s.details}
+                            </div>
+                          )}
+                          {s.sql && (
+                            <pre className="text-[10px] p-2 bg-muted rounded font-mono whitespace-pre-wrap overflow-x-auto">
+                              {s.sql}
+                            </pre>
+                          )}
+                          {s.recommendation && (
+                            <div className="text-xs text-primary">{s.recommendation}</div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+
+              {selectedSuggestions.size > 0 && (
+                <div className="mt-3 pt-3 border-t">
+                  <Button
+                    onClick={handleApplySelected}
+                    disabled={applyLoading}
+                    className="w-full text-xs"
+                    size="sm"
+                  >
+                    {applyLoading ? (
+                      <>
+                        <RefreshCw className="h-3 w-3 animate-spin" />
+                        Applying...
+                      </>
+                    ) : (
+                      `Apply Selected (${selectedSuggestions.size})`
+                    )}
+                  </Button>
+                </div>
+              )}
+
+              {applyResults && (
+                <Card
+                  className={`mt-3 ${
+                    applyResults.error_count > 0 ? 'bg-destructive/10' : 'bg-primary/10'
+                  }`}
+                >
+                  <CardContent className="p-3">
+                    <div className="text-sm font-semibold mb-2">
+                      Apply Results: {applyResults.success_count} succeeded,{' '}
+                      {applyResults.error_count} failed
+                    </div>
+                    <div className="space-y-2">
+                      {applyResults.results?.map((r: any, idx: number) => (
+                        <Card key={idx}>
+                          <CardContent className="p-2">
+                            <div
+                              className={`text-xs font-semibold ${
+                                r.status === 'success' ? 'text-primary' : 'text-destructive'
+                              }`}
+                            >
+                              {r.message}
+                            </div>
+                            {r.sql && (
+                              <div className="font-mono text-[10px] mt-1 text-muted-foreground">
+                                {r.sql}
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          ) : null}
+        </div>
+      )}
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">

@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Plus, Trash2, RefreshCw, ChevronDown } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 import {
   FEATURED_ENGINES,
   OTHER_ENGINES,
@@ -18,6 +18,7 @@ import {
   initialValues,
   EngineLogo,
 } from '../lib/dbEngines';
+import { DBExplorer } from './DBExplorer';
 
 interface Props {
   onSelectDataSource: (dsId: string) => void;
@@ -32,6 +33,8 @@ export function ConnectionPanel({ onSelectDataSource, selectedDataSource }: Prop
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  // Which connections are expanded to reveal their schema tree (pgAdmin-style).
+  const [expandedConns, setExpandedConns] = useState<Set<string>>(new Set());
   // Structured connection form: pick an engine, then fill host/port/etc. — the
   // DSN is assembled from these fields so users never type a raw connection string.
   const [engine, setEngine] = useState('postgres');
@@ -47,6 +50,19 @@ export function ConnectionPanel({ onSelectDataSource, selectedDataSource }: Prop
     setEngine('postgres');
     setConnId('');
     setFieldValues(initialValues('postgres'));
+  };
+
+  const toggleConn = (id: string) =>
+    setExpandedConns((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  // Selecting a connection also expands it to reveal its schema tree.
+  const handleConnClick = (id: string) => {
+    onSelectDataSource(id);
+    setExpandedConns((prev) => new Set(prev).add(id));
   };
 
   // Dashboard data
@@ -324,48 +340,69 @@ export function ConnectionPanel({ onSelectDataSource, selectedDataSource }: Prop
               </Dialog>
             </div>
 
-            <div className="flex flex-col gap-2">
+            {/* pgAdmin-style object explorer: each data source is a node whose
+                schema tree expands directly beneath it. */}
+            <div className="flex flex-col">
               {Object.keys(dataSources).length === 0 ? (
                 <div className="text-center p-5 text-muted-foreground text-xs">
                   No connections
                 </div>
               ) : (
-                Object.entries(dataSources).map(([id, ds]) => (
-                  <Card
-                    key={id}
-                    className={`cursor-pointer transition-colors ${
-                      selectedDataSource === id ? 'border-primary border-2 bg-primary/5' : ''
-                    }`}
-                    onClick={() => onSelectDataSource(id)}
-                  >
-                    <CardContent className="p-3 flex justify-between items-center">
-                      <div className="flex items-center gap-2 flex-1">
+                Object.entries(dataSources).map(([id, ds]) => {
+                  const expanded = expandedConns.has(id);
+                  const selected = selectedDataSource === id;
+                  return (
+                    <div key={id}>
+                      <div
+                        onClick={() => handleConnClick(id)}
+                        className={`group flex items-center gap-1.5 px-1.5 py-1.5 rounded cursor-pointer select-none transition-colors ${
+                          selected ? 'bg-primary/10' : 'hover:bg-accent'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleConn(id);
+                          }}
+                          className="shrink-0"
+                          title={expanded ? 'Collapse' : 'Expand'}
+                        >
+                          <ChevronRight
+                            className={`h-4 w-4 text-muted-foreground transition-transform ${
+                              expanded ? 'rotate-90' : ''
+                            }`}
+                          />
+                        </button>
                         <EngineLogo engine={ds.engine} size={18} />
-                        <div>
-                          <div className="text-sm font-semibold">{id}</div>
-                          <div className="text-xs text-muted-foreground">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-semibold truncate">{id}</div>
+                          <div className="text-[10px] text-muted-foreground truncate">
                             {getEngineDef(ds.engine)?.label ?? ds.engine}
                           </div>
                         </div>
-                        {selectedDataSource === id && (
-                          <Badge variant="default" className="ml-2 text-xs">
-                            <div className="w-2 h-2 bg-green-500 rounded-full mr-1"></div>
-                            Connected
-                          </Badge>
+                        {selected && (
+                          <span className="w-2 h-2 bg-green-500 rounded-full shrink-0" title="Connected" />
                         )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                          onClick={(e) => handleDelete(id, e)}
+                          title={`Delete ${id}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={(e) => handleDelete(id, e)}
-                        title={`Delete ${id}`}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))
+
+                      {expanded && (
+                        <div className="ml-3 pl-1 border-l border-border">
+                          <DBExplorer dataSourceId={id} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           </TabsContent>
