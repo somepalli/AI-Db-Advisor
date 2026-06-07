@@ -14,7 +14,7 @@ import asyncio
 from ..deps import resolve_agent
 from ..services.ai_client import LLMClient
 from ..services.context_builder import build_ai_context
-from ..services.gated_context import build_gated_context
+from ..services.gated_context import build_gated_context, GATED_ENGINES
 from ..services.tool_registry import scrub_literals, normalize_sql
 from ..services.llm_settings import resolve_provider_trust
 
@@ -56,16 +56,17 @@ async def _stream_chat_response(
 
         logger.info(f"Streaming AI Chat - DB: {db_type}, trust={trust}, Message: {message[:100]}...")
 
-        # Build context. PostgreSQL uses the provider-trust gated path (sample rows only for
-        # local models, metadata tools sanitized); other engines keep the legacy builder.
-        # Default the message defensively: scrubbed for hosted Postgres so a context-build
-        # failure can never leave literals in the prompt; the gated path re-confirms below.
+        # Build context. PostgreSQL and MySQL use the provider-trust gated path (sample rows
+        # only for local models, metadata tools sanitized); other engines keep the legacy
+        # builder. Default the message defensively: scrubbed for hosted gated engines so a
+        # context-build failure can never leave literals in the prompt; the gated path
+        # re-confirms below.
         safe_message = (
             scrub_literals(message)
-            if (engine == "postgres" and trust == "hosted") else message
+            if (engine in GATED_ENGINES and trust == "hosted") else message
         )
         try:
-            if engine == "postgres":
+            if engine in GATED_ENGINES:
                 context_str, safe_message = await build_gated_context(
                     ds_id=ds_id, engine=engine, trust=trust,
                     user_message=message, current_sql=current_sql,
@@ -117,10 +118,10 @@ Respond in a natural, conversational tone. You can think out loud as you work th
         user_content_parts = []
         if current_sql:
             # Literals in the editor SQL are an egress channel too: scrub them for hosted
-            # Postgres models the same way the NL question is scrubbed above.
+            # gated-engine models the same way the NL question is scrubbed above.
             safe_sql = (
                 normalize_sql(current_sql)
-                if (engine == "postgres" and trust == "hosted") else current_sql
+                if (engine in GATED_ENGINES and trust == "hosted") else current_sql
             )
             user_content_parts.append(f"Current SQL in editor:\n```sql\n{safe_sql}\n```\n")
         # safe_message == message for local trust; literals scrubbed for hosted models.

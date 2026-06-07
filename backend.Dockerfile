@@ -30,7 +30,17 @@ RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
 # Optionally add pyodbc/oracledb (their system libs are added in the runtime stage too).
-RUN if [ "$OPTIONAL_DB_DRIVERS" = "1" ]; then pip install -r requirements-optional.txt; fi
+# pyodbc needs the unixodbc headers to build. Install each optional driver best-effort so
+# one that lacks a py3.13 build (e.g. cassandra-driver) doesn't fail the whole image — the
+# SQL drivers (pyodbc/oracledb) still get installed.
+RUN if [ "$OPTIONAL_DB_DRIVERS" = "1" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends unixodbc-dev \
+        && rm -rf /var/lib/apt/lists/* \
+        && tr -d '\r' < requirements-optional.txt | while read -r pkg; do \
+               case "$pkg" in ""|\#*) continue;; esac; \
+               pip install "$pkg" || echo "WARN: optional driver skipped: $pkg"; \
+           done ; \
+    fi
 
 # ---- Runtime ---------------------------------------------------------------
 FROM python:3.13-slim AS runtime
@@ -51,9 +61,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Optional: SQL Server ODBC driver when OPTIONAL_DB_DRIVERS=1 (best-effort; skipped otherwise).
+# Optional: Microsoft SQL Server ODBC driver (msodbcsql18) when OPTIONAL_DB_DRIVERS=1.
+# Installs the actual MS driver from packages.microsoft.com — not just unixodbc — so
+# pyodbc can connect. The bookworm repo packages install fine on trixie. ACCEPT_EULA=Y
+# is required and non-interactive.
 RUN if [ "$OPTIONAL_DB_DRIVERS" = "1" ]; then \
-        apt-get update && apt-get install -y --no-install-recommends unixodbc gnupg curl ca-certificates \
+        apt-get update && apt-get install -y --no-install-recommends \
+            unixodbc gnupg curl ca-certificates apt-transport-https \
+        && curl -sSL https://packages.microsoft.com/keys/microsoft.asc \
+            | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
+        && echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
+            > /etc/apt/sources.list.d/mssql-release.list \
+        && apt-get update \
+        && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
         && rm -rf /var/lib/apt/lists/* ; \
     fi
 

@@ -7,6 +7,7 @@ from backend.services.tool_registry import (
     normalize_sql,
     drop_value_arrays,
     strip_query_text,
+    strip_plan_params,
     scrub_literals,
     names_only,
 )
@@ -31,7 +32,44 @@ def test_local_includes_data_tools():
 
 
 def test_unknown_engine_returns_nothing():
-    assert active_tools("mysql", "local") == []
+    assert active_tools("elasticsearch", "local") == []
+
+
+def test_mysql_hosted_excludes_data_tools():
+    hosted = active_tools("mysql", "hosted")
+    assert hosted and {t.tier for t in hosted} == {"metadata"}
+
+
+def test_mysql_local_includes_data_tools():
+    local = active_tools("mysql", "local")
+    hosted = active_tools("mysql", "hosted")
+    assert len(local) > len(hosted)
+    data = {t.name for t in local if t.tier == "data"}
+    assert data == {"my.sample_rows", "my.run_query"}
+
+
+def test_mysql_local_data_tools_named():
+    data = {t.name for t in active_tools("mysql", "local") if t.tier == "data"}
+    assert data == {"my.sample_rows", "my.run_query"}
+
+
+def test_sqlserver_hosted_excludes_data_tools():
+    hosted = active_tools("sqlserver", "hosted")
+    assert hosted and {t.tier for t in hosted} == {"metadata"}
+
+
+def test_sqlserver_local_includes_data_tools():
+    local = active_tools("sqlserver", "local")
+    hosted = active_tools("sqlserver", "hosted")
+    assert len(local) > len(hosted)
+    data = {t.name for t in local if t.tier == "data"}
+    assert data == {"mssql.sample_rows", "mssql.run_query"}
+
+
+def test_selector_isolates_engines():
+    # Each engine session only sees its own tools.
+    for eng in ("postgres", "mysql", "sqlserver"):
+        assert all(t.engine == eng for t in active_tools(eng, "local"))
 
 
 def test_data_tools_have_no_sanitizers_and_metadata_ops_exist():
@@ -83,6 +121,19 @@ def test_strip_query_text_removes_query_field():
     out = strip_query_text(rows)
     assert "query" not in out[0]
     assert out[0]["mode"] == "AccessShare"
+
+
+def test_strip_plan_params_normalizes_and_drops_handles():
+    rows = [{
+        "query": "select * from orders where id = 4021",
+        "calls": 5,
+        "sql_handle": b"\x01\x02", "plan_handle": b"\x03", "query_plan": "<xml/>",
+    }]
+    out = strip_plan_params(rows)
+    assert "4021" not in out[0]["query"] and "$1" in out[0]["query"]
+    assert "sql_handle" not in out[0] and "plan_handle" not in out[0]
+    assert "query_plan" not in out[0]
+    assert out[0]["calls"] == 5
 
 
 def test_scrub_literals_masks_numbers_and_strings():
