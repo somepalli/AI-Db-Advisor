@@ -12,8 +12,8 @@ Metadata tool outputs always pass through their declared sanitizers before they 
 reach a hosted model. ``scrub_literals`` / ``names_only`` handle the separate egress
 channel (the NL question + schema) that the tool gate does not cover.
 
-Covers PostgreSQL and MySQL/MariaDB; the descriptor format is engine-generic so other
-engines slot in later.
+Covers PostgreSQL, MySQL/MariaDB and SQL Server; the descriptor format is engine-generic
+so other engines slot in later.
 """
 from __future__ import annotations
 
@@ -65,6 +65,19 @@ REGISTRY: List[Tool] = [
     # data — local-trust only
     Tool("my.sample_rows",     "mysql", "data", "sample_rows", description="Sample rows from a table"),
     Tool("my.run_query",       "mysql", "data", "run_query",   description="Run a read query"),
+
+    # ------------------------------------------------------------ SQL Server
+    # metadata — always available
+    Tool("mssql.list_schema",         "sqlserver", "metadata", "list_schema",         description="Tables and columns"),
+    Tool("mssql.missing_indexes",     "sqlserver", "metadata", "missing_indexes",     description="Engine missing-index recommendations (dm_db_missing_index_*)"),
+    Tool("mssql.index_usage",         "sqlserver", "metadata", "index_usage",         description="Index seeks/scans/updates (dm_db_index_usage_stats)"),
+    Tool("mssql.index_fragmentation", "sqlserver", "metadata", "index_fragmentation", description="Index fragmentation (dm_db_index_physical_stats)"),
+    Tool("mssql.top_queries",         "sqlserver", "metadata", "top_queries",         sanitize=("strip_plan_params",), description="Slowest queries (dm_exec_query_stats)"),
+    Tool("mssql.estimated_plan",      "sqlserver", "metadata", "estimated_plan",      description="Estimated plan (SHOWPLAN_XML, no execution)"),
+    Tool("mssql.query_store_regress", "sqlserver", "metadata", "query_store_regress", description="Query Store regressed queries"),
+    # data — local-trust only
+    Tool("mssql.sample_rows",         "sqlserver", "data", "sample_rows", description="Sample rows from a table"),
+    Tool("mssql.run_query",           "sqlserver", "data", "run_query",   description="Run a read query"),
 ]
 
 
@@ -121,10 +134,26 @@ def strip_query_text(value: Any) -> Any:
     return value
 
 
+_HANDLE_KEYS = ("plan_handle", "sql_handle", "query_hash", "query_plan_hash", "query_plan")
+
+
+def strip_plan_params(value: Any) -> Any:
+    """SQL Server cached-plan rows: normalize literals in the statement text and drop
+    binary handles / raw plan blobs so no parameter values reach a hosted model."""
+    if isinstance(value, list):
+        for row in value:
+            if isinstance(row, dict):
+                for k in _HANDLE_KEYS:
+                    row.pop(k, None)
+        normalize_sql(value)  # parameterizes the 'query' field in place
+    return value
+
+
 SANITIZERS: Dict[str, Callable[[Any], Any]] = {
     "normalize_sql": normalize_sql,
     "drop_value_arrays": drop_value_arrays,
     "strip_query_text": strip_query_text,
+    "strip_plan_params": strip_plan_params,
 }
 
 

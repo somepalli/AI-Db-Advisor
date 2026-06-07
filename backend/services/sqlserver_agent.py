@@ -22,21 +22,11 @@ class SQLServerAgent(BaseAgent):
         """Create SQL Server connection using pyodbc"""
         try:
             import pyodbc
-            from urllib.parse import urlparse
+            from .dsn_utils import build_mssql_odbc_connstr
 
-            parsed = urlparse(self.dsn)
-
-            # Build connection string
-            conn_str = (
-                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-                f"SERVER={parsed.hostname or 'localhost'},{parsed.port or 1433};"
-                f"DATABASE={parsed.path.lstrip('/') if parsed.path else 'master'};"
-                f"UID={parsed.username};"
-                f"PWD={parsed.password}"
-            )
-
-            conn = pyodbc.connect(conn_str, autocommit=True)
-            return conn
+            # Picks the newest installed driver (18/17/...) and trusts the server cert
+            # so dev/containerized SQL Server (self-signed TLS) connects.
+            return pyodbc.connect(build_mssql_odbc_connstr(self.dsn), autocommit=True)
         except ImportError:
             raise Exception("pyodbc not installed. Run: pip install pyodbc")
 

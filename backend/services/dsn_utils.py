@@ -9,6 +9,7 @@ settings.DSN_LOCALHOST_REPLACEMENT (host.docker.internal on Docker Desktop), let
 users register datasources with the natural "localhost" host.
 """
 import logging
+import re
 from urllib.parse import urlsplit, urlunsplit
 
 from ..config import settings
@@ -63,3 +64,48 @@ def maybe_rewrite_localhost_dsn(dsn: str) -> str:
 # The same localhost->container-host rewrite applies to any URL (e.g. the LLM
 # endpoint), not just database DSNs. Exposed under a clearer name for that use.
 maybe_rewrite_localhost_url = maybe_rewrite_localhost_dsn
+
+
+def pick_sqlserver_odbc_driver() -> str:
+    """Return the best installed Microsoft SQL Server ODBC driver name.
+
+    Prefers the newest "ODBC Driver NN for SQL Server" (18 > 17 > 13...) and falls
+    back to the legacy "SQL Server" driver. Avoids hardcoding a version that may not
+    be present in a given image/host."""
+    try:
+        import pyodbc
+        installed = list(pyodbc.drivers())
+    except Exception:
+        return "ODBC Driver 18 for SQL Server"
+
+    versioned = []
+    for name in installed:
+        m = re.match(r"ODBC Driver (\d+) for SQL Server", name)
+        if m:
+            versioned.append((int(m.group(1)), name))
+    if versioned:
+        return max(versioned)[1]
+    if "SQL Server" in installed:
+        return "SQL Server"
+    return "ODBC Driver 18 for SQL Server"
+
+
+def build_mssql_odbc_connstr(dsn: str) -> str:
+    """Build a pyodbc connection string from an mssql:// DSN.
+
+    Honours the localhost->container-host rewrite, picks the installed driver, and
+    sets TrustServerCertificate=yes (Driver 18 defaults to Encrypt=yes, which rejects
+    self-signed certs — common for containerized/dev SQL Server) so dev connections
+    don't fail on TLS validation."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(maybe_rewrite_localhost_dsn(dsn))
+    driver = pick_sqlserver_odbc_driver()
+    return (
+        f"DRIVER={{{driver}}};"
+        f"SERVER={parsed.hostname or 'localhost'},{parsed.port or 1433};"
+        f"DATABASE={parsed.path.lstrip('/') if parsed.path else 'master'};"
+        f"UID={parsed.username};"
+        f"PWD={parsed.password};"
+        f"TrustServerCertificate=yes;"
+    )

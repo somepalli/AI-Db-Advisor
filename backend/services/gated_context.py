@@ -29,11 +29,12 @@ from .tool_registry import (
 )
 from .postgres_mcp_executor import PostgresMcpExecutor
 from .mysql_mcp_executor import MySqlMcpExecutor
+from .mssql_mcp_executor import MsSqlMcpExecutor
 
 logger = logging.getLogger(__name__)
 
 # Engines that route through the provider-trust gated path (vs. legacy build_ai_context).
-GATED_ENGINES = ("postgres", "mysql")
+GATED_ENGINES = ("postgres", "mysql", "sqlserver")
 
 # Metadata ops auto-run into the prompt each turn (bounded latency), per engine. Other
 # registered metadata tools stay available but aren't auto-run. ``explain`` is appended
@@ -41,9 +42,14 @@ GATED_ENGINES = ("postgres", "mysql")
 _CONTEXT_OPS = {
     "postgres": ("index_inventory", "index_usage", "top_queries", "table_bloat", "lock_waits", "health"),
     "mysql": ("index_inventory", "index_usage", "top_queries", "table_stats", "config_audit"),
+    "sqlserver": ("missing_indexes", "index_usage", "index_fragmentation", "top_queries"),
 }
 _MAX_ROWS = 40          # cap rows shown per tool
 _MAX_TEXT = 4000        # cap length of text-returning tools (health/explain)
+
+
+# The on-demand "plan" op (run when the editor has SQL) is named per engine.
+_PLAN_OP = {"postgres": "explain", "mysql": "explain", "sqlserver": "estimated_plan"}
 
 
 def _make_executor(engine: str, dsn: str, trust: str):
@@ -51,6 +57,8 @@ def _make_executor(engine: str, dsn: str, trust: str):
         return PostgresMcpExecutor(dsn, trust)
     if engine == "mysql":
         return MySqlMcpExecutor(dsn, trust)
+    if engine == "sqlserver":
+        return MsSqlMcpExecutor(dsn, trust)
     raise ValueError(f"No gated executor for engine {engine!r}")
 
 
@@ -102,8 +110,9 @@ async def build_gated_context(
     # Gated metadata tools.
     tools = {t.mcp_op: t for t in active_tools(engine, trust) if t.tier == "metadata"}
     ops = list(_CONTEXT_OPS.get(engine, ()))
-    if current_sql and "explain" not in ops:
-        ops.append("explain")
+    plan_op = _PLAN_OP.get(engine, "explain")
+    if current_sql and plan_op not in ops:
+        ops.append(plan_op)
 
     executor = _make_executor(engine, dsn, trust)
     try:
@@ -112,7 +121,7 @@ async def build_gated_context(
             tool = tools.get(op)
             if not tool:
                 continue
-            args = {"sql": current_sql} if op == "explain" else {}
+            args = {"sql": current_sql} if op == plan_op else {}
             try:
                 out = await run_metadata_tool(tool, executor, args)
                 tool_parts.append(_fmt(tool.name, out))
