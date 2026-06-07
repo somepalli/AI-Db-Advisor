@@ -10,8 +10,8 @@ provider-trust data boundary:
     their outputs are sanitized before they enter the prompt;
   * the user's question is scrubbed of literals when hosted.
 
-PostgreSQL only for now; callers fall back to the legacy ``build_ai_context`` for
-other engines.
+PostgreSQL and MySQL/MariaDB use this gated path; callers fall back to the legacy
+``build_ai_context`` for other engines.
 """
 from __future__ import annotations
 
@@ -28,14 +28,30 @@ from .tool_registry import (
     scrub_literals,
 )
 from .postgres_mcp_executor import PostgresMcpExecutor
+from .mysql_mcp_executor import MySqlMcpExecutor
 
 logger = logging.getLogger(__name__)
 
-# Metadata ops auto-run into the prompt each turn (bounded latency). Other registered
-# metadata tools (e.g. column_stats, index_advice) stay available but aren't auto-run.
-_CONTEXT_OPS = ("index_inventory", "index_usage", "top_queries", "table_bloat", "lock_waits", "health")
+# Engines that route through the provider-trust gated path (vs. legacy build_ai_context).
+GATED_ENGINES = ("postgres", "mysql")
+
+# Metadata ops auto-run into the prompt each turn (bounded latency), per engine. Other
+# registered metadata tools stay available but aren't auto-run. ``explain`` is appended
+# on demand when the editor has SQL.
+_CONTEXT_OPS = {
+    "postgres": ("index_inventory", "index_usage", "top_queries", "table_bloat", "lock_waits", "health"),
+    "mysql": ("index_inventory", "index_usage", "top_queries", "table_stats", "config_audit"),
+}
 _MAX_ROWS = 40          # cap rows shown per tool
 _MAX_TEXT = 4000        # cap length of text-returning tools (health/explain)
+
+
+def _make_executor(engine: str, dsn: str, trust: str):
+    if engine == "postgres":
+        return PostgresMcpExecutor(dsn, trust)
+    if engine == "mysql":
+        return MySqlMcpExecutor(dsn, trust)
+    raise ValueError(f"No gated executor for engine {engine!r}")
 
 
 def _fmt(name: str, out: Any) -> str:
@@ -59,7 +75,7 @@ async def build_gated_context(
     user_message: str,
     current_sql: Optional[str] = None,
 ) -> Tuple[str, str]:
-    """Return (context_str, safe_user_message). PostgreSQL only."""
+    """Return (context_str, safe_user_message). PostgreSQL and MySQL."""
     agent = resolve_agent(ds_id)
     cfg = settings.DATASOURCES.get(ds_id) or {}
     dsn = cfg.get("dsn", "")
@@ -85,11 +101,11 @@ async def build_gated_context(
 
     # Gated metadata tools.
     tools = {t.mcp_op: t for t in active_tools(engine, trust) if t.tier == "metadata"}
-    ops = list(_CONTEXT_OPS)
+    ops = list(_CONTEXT_OPS.get(engine, ()))
     if current_sql and "explain" not in ops:
         ops.append("explain")
 
-    executor = PostgresMcpExecutor(dsn, trust)
+    executor = _make_executor(engine, dsn, trust)
     try:
         tool_parts: List[str] = []
         for op in ops:

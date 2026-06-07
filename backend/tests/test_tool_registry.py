@@ -31,7 +31,26 @@ def test_local_includes_data_tools():
 
 
 def test_unknown_engine_returns_nothing():
-    assert active_tools("mysql", "local") == []
+    assert active_tools("elasticsearch", "local") == []
+
+
+def test_mysql_hosted_excludes_data_tools():
+    hosted = active_tools("mysql", "hosted")
+    assert hosted and {t.tier for t in hosted} == {"metadata"}
+
+
+def test_mysql_local_includes_data_tools():
+    local = active_tools("mysql", "local")
+    hosted = active_tools("mysql", "hosted")
+    assert len(local) > len(hosted)
+    data = {t.name for t in local if t.tier == "data"}
+    assert data == {"my.sample_rows", "my.run_query"}
+
+
+def test_selector_isolates_engines():
+    # A postgres session never sees mysql tools and vice versa.
+    assert all(t.engine == "postgres" for t in active_tools("postgres", "local"))
+    assert all(t.engine == "mysql" for t in active_tools("mysql", "local"))
 
 
 def test_data_tools_have_no_sanitizers_and_metadata_ops_exist():

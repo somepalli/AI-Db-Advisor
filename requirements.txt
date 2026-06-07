@@ -16,6 +16,7 @@ clickhouse-connect==0.7.9
 
 # Database drivers (pure-python / prebuilt wheels — safe in the slim image)
 pymysql==1.1.1            # MySQL / MariaDB
+cryptography>=42.0        # required by pymysql for MySQL 8 caching_sha2_password auth
 redis==5.0.8             # Redis
 pymongo==4.8.0           # MongoDB
 # Cassandra (cassandra-driver), SQL Server (pyodbc) and Oracle (oracledb) need a

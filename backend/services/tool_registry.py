@@ -12,7 +12,7 @@ Metadata tool outputs always pass through their declared sanitizers before they 
 reach a hosted model. ``scrub_literals`` / ``names_only`` handle the separate egress
 channel (the NL question + schema) that the tool gate does not cover.
 
-This first cut covers PostgreSQL only; the descriptor format is engine-generic so other
+Covers PostgreSQL and MySQL/MariaDB; the descriptor format is engine-generic so other
 engines slot in later.
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ class Tool:
     name: str                       # stable id, e.g. "pg.top_queries"
     engine: str                     # which engine it belongs to
     tier: str                       # "metadata" (always on) | "data" (local-only)
-    mcp_op: str                     # PostgresMcpExecutor coroutine name
+    mcp_op: str                     # executor coroutine name (Postgres/MySQL executor)
     sanitize: tuple = ()            # ordered sanitizer ids applied to the output
     description: str = ""
 
@@ -52,6 +52,19 @@ REGISTRY: List[Tool] = [
     Tool("pg.sample_rows",     "postgres", "data", "sample_rows",    description="Sample rows from a table"),
     Tool("pg.run_query",       "postgres", "data", "run_query",      description="Run a read query"),
     Tool("pg.profile_values",  "postgres", "data", "profile_values", description="Value frequency profile of a column"),
+
+    # ------------------------------------------------------------ MySQL / MariaDB
+    # metadata — always available
+    Tool("my.list_schema",     "mysql", "metadata", "list_schema",     description="Tables and columns"),
+    Tool("my.index_inventory", "mysql", "metadata", "index_inventory", description="Existing indexes (information_schema.statistics)"),
+    Tool("my.index_usage",     "mysql", "metadata", "index_usage",     description="Unused indexes (sys.schema_unused_indexes)"),
+    Tool("my.top_queries",     "mysql", "metadata", "top_queries",     sanitize=("normalize_sql",), description="Slowest queries (performance_schema digest)"),
+    Tool("my.explain",         "mysql", "metadata", "explain",         description="EXPLAIN FORMAT=JSON plan"),
+    Tool("my.table_stats",     "mysql", "metadata", "table_stats",     description="Table sizes / row estimates"),
+    Tool("my.config_audit",    "mysql", "metadata", "config_audit",    description="Server tuning variables"),
+    # data — local-trust only
+    Tool("my.sample_rows",     "mysql", "data", "sample_rows", description="Sample rows from a table"),
+    Tool("my.run_query",       "mysql", "data", "run_query",   description="Run a read query"),
 ]
 
 

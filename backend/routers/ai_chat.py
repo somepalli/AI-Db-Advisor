@@ -14,7 +14,7 @@ from ..deps import resolve_agent
 from ..services.ai_client import LLMClient
 from ..services import chat_history
 from ..services.context_builder import build_ai_context
-from ..services.gated_context import build_gated_context
+from ..services.gated_context import build_gated_context, GATED_ENGINES
 from ..services.tool_registry import scrub_literals, normalize_sql
 from ..services.llm_settings import resolve_provider_trust
 from ..services.mcp_client import get_mcp_client
@@ -83,16 +83,16 @@ async def ai_chat(body: ChatRequest):
         # failure can never leave literals in the prompt; the gated path re-confirms below.
         safe_message = (
             scrub_literals(body.message)
-            if (engine == "postgres" and trust == "hosted") else body.message
+            if (engine in GATED_ENGINES and trust == "hosted") else body.message
         )
 
-        # Get schema context. PostgreSQL uses the provider-trust gated path (metadata tools +
-        # sample rows only for local models); other engines keep the legacy context builder.
+        # Get schema context. PostgreSQL and MySQL use the provider-trust gated path (metadata
+        # tools + sample rows only for local models); other engines keep the legacy builder.
         try:
             schema = agent.get_schema()
             tables = list(schema.get("tables", {}).keys())
 
-            if engine == "postgres":
+            if engine in GATED_ENGINES:
                 context_str, safe_message = await build_gated_context(
                     ds_id=body.ds_id, engine=engine, trust=trust,
                     user_message=body.message, current_sql=body.current_sql,
@@ -162,10 +162,10 @@ Wrong SQL: SELECT * FROM enrollments WHERE semester LIKE '%2020%' (if 'semester'
 
         if body.current_sql:
             # Literals in the editor SQL are an egress channel too: scrub them for hosted
-            # Postgres models the same way the NL question is scrubbed above.
+            # gated-engine models the same way the NL question is scrubbed above.
             safe_sql = (
                 normalize_sql(body.current_sql)
-                if (engine == "postgres" and trust == "hosted") else body.current_sql
+                if (engine in GATED_ENGINES and trust == "hosted") else body.current_sql
             )
             user_content_parts.append(f"Current SQL in editor:\n```sql\n{safe_sql}\n```\n")
 

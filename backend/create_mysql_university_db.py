@@ -3,15 +3,26 @@
 Script to create MySqlUniversityDB database and tables with same structure as PostgreSQL UniversityDB
 """
 
+import os
 import pymysql
 import random
 from datetime import datetime, timedelta, date
 
-# MySQL connection details
-MYSQL_HOST = 'localhost'
-MYSQL_USER = 'root'
-MYSQL_PASSWORD = 'Somepalli*3'
-MYSQL_DB = 'MySqlUniversityDB'
+# MySQL connection details (overridable via env so the same script targets a local
+# install or a Docker container, e.g. MYSQL_PORT=3309 for the aidba-mysql container).
+MYSQL_HOST = os.getenv('MYSQL_HOST', 'localhost')
+MYSQL_PORT = int(os.getenv('MYSQL_PORT', '3306'))
+MYSQL_USER = os.getenv('MYSQL_USER', 'root')
+MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'Somepalli*3')
+MYSQL_DB = os.getenv('MYSQL_DB', 'MySqlUniversityDB')
+
+
+def _connect(use_db: bool = True):
+    """Single connection factory honouring host/port/user/password env overrides."""
+    kwargs = dict(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD)
+    if use_db:
+        kwargs['database'] = MYSQL_DB
+    return pymysql.connect(**kwargs)
 
 # Sample data (same as populate_university_db.py)
 first_names = ['John', 'Jane', 'Michael', 'Sarah', 'David', 'Emma', 'James', 'Emily', 'Robert', 'Olivia',
@@ -51,11 +62,7 @@ def create_database():
     """Create MySqlUniversityDB database"""
     print("Creating MySqlUniversityDB database...")
 
-    conn = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD
-    )
+    conn = _connect(use_db=False)
 
     try:
         with conn.cursor() as cur:
@@ -72,12 +79,7 @@ def create_tables():
     """Create all tables with same structure as PostgreSQL"""
     print("\nCreating tables...")
 
-    conn = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DB
-    )
+    conn = _connect()
 
     try:
         with conn.cursor() as cur:
@@ -219,12 +221,7 @@ def populate_departments(num_rows=10):
     """Insert department data"""
     print(f"\nInserting {num_rows} departments...")
 
-    conn = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DB
-    )
+    conn = _connect()
 
     try:
         with conn.cursor() as cur:
@@ -251,12 +248,7 @@ def populate_students(num_departments, num_rows=12000):
     """Insert student data"""
     print(f"Inserting {num_rows} students...")
 
-    conn = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DB
-    )
+    conn = _connect()
 
     try:
         with conn.cursor() as cur:
@@ -306,12 +298,7 @@ def populate_professors(num_departments, num_rows=500):
     """Insert professor data"""
     print(f"Inserting {num_rows} professors...")
 
-    conn = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DB
-    )
+    conn = _connect()
 
     try:
         with conn.cursor() as cur:
@@ -352,12 +339,7 @@ def populate_courses(num_departments, num_rows=150):
     """Insert course data"""
     print(f"Inserting {num_rows} courses...")
 
-    conn = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DB
-    )
+    conn = _connect()
 
     try:
         with conn.cursor() as cur:
@@ -385,12 +367,7 @@ def populate_enrollments(num_students, num_courses, num_rows=15000):
     """Insert enrollment data"""
     print(f"Inserting {num_rows} enrollments...")
 
-    conn = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DB
-    )
+    conn = _connect()
 
     try:
         with conn.cursor() as cur:
@@ -435,12 +412,7 @@ def populate_fees(num_students, num_rows=12000):
     """Insert fee data"""
     print(f"Inserting {num_rows} fees...")
 
-    conn = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DB
-    )
+    conn = _connect()
 
     try:
         with conn.cursor() as cur:
@@ -483,12 +455,7 @@ def populate_hostels(num_rows=20):
     """Insert hostel data"""
     print(f"Inserting {num_rows} hostels...")
 
-    conn = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DB
-    )
+    conn = _connect()
 
     try:
         with conn.cursor() as cur:
@@ -516,12 +483,7 @@ def populate_hostel_allocation(num_students, num_hostels, num_rows=10000):
     """Insert hostel allocation data"""
     print(f"Inserting {num_rows} hostel allocations...")
 
-    conn = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DB
-    )
+    conn = _connect()
 
     try:
         with conn.cursor() as cur:
@@ -565,12 +527,7 @@ def populate_library_books(num_departments, num_rows=5000):
     """Insert library book data"""
     print(f"Inserting {num_rows} library books...")
 
-    conn = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DB
-    )
+    conn = _connect()
 
     try:
         with conn.cursor() as cur:
@@ -614,12 +571,7 @@ def populate_book_loans(num_students, num_books, num_rows=14000):
     """Insert book loan data"""
     print(f"Inserting {num_rows} book loans...")
 
-    conn = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DB
-    )
+    conn = _connect()
 
     try:
         with conn.cursor() as cur:
@@ -662,12 +614,7 @@ def show_final_counts():
     print("Final Table Row Counts:")
     print("="*60)
 
-    conn = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DB
-    )
+    conn = _connect()
 
     try:
         with conn.cursor() as cur:
