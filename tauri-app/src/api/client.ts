@@ -504,6 +504,8 @@ export interface MCPSuggestion {
   description: string;
   rationale: string;
   category: string;
+  /** Guardrail-wall classification (Stage 6): metadata_read | safe_write | impactful_write. */
+  risk_class?: 'metadata_read' | 'safe_write' | 'impactful_write' | 'destructive' | 'unknown';
   risk_level: 'low' | 'medium' | 'high' | 'critical';
   impact_level?: 'minimal' | 'moderate' | 'significant' | 'massive';
   warnings: string[];
@@ -636,6 +638,71 @@ export const mcpApi = {
   // Health check
   healthCheck: async (): Promise<any> => {
     return apiRequest<any>('/mcp/health');
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Agent API (Stage 6) — bounded, metadata-only investigation loop + alarms
+// ---------------------------------------------------------------------------
+export interface AgentTraceStep {
+  step?: number;
+  action: string;            // tool | propose_queued | propose_blocked | finish | halt | error | ...
+  tool?: string;
+  input?: any;
+  observation?: string;
+  sql?: string;
+  rationale?: string;
+  approval_id?: string;
+  risk_class?: string;
+  reason?: string;
+  alert?: boolean;
+  summary?: string;
+  detail?: string;
+}
+
+export interface InvestigateRequest {
+  goal: string;
+  max_iters?: number;
+  token_budget?: number;
+}
+
+export interface InvestigateResponse {
+  ds_id: string;
+  goal: string;
+  iterations: number;
+  trace: AgentTraceStep[];
+  approval_ids: string[];
+  blocked: Array<{ sql: string; reason: string; rule?: string; alert?: boolean }>;
+}
+
+export interface DestructiveAlert {
+  id: string;
+  alert_class: string;       // "DESTRUCTIVE_BLOCKED"
+  ts: string;
+  ds_id: string | null;
+  matched_rule: string | null;
+  risk_class: string | null;
+  statement: string;
+  reason: string;
+  actor?: string | null;
+  source?: string | null;
+}
+
+export const agentApi = {
+  // Run the bounded metadata-only investigation loop.
+  investigate: async (dsId: string, body: InvestigateRequest, userId: string = 'agent'): Promise<InvestigateResponse> => {
+    return apiRequest<InvestigateResponse>(`/agent/${dsId}/investigate`, {
+      method: 'POST',
+      headers: { 'X-User-ID': userId },
+      body: JSON.stringify(body),
+    });
+  },
+
+  // Recent DESTRUCTIVE_BLOCKED alarms (informational only — never approvable).
+  getDestructiveAlerts: async (dsId: string, limit: number = 100): Promise<{ ds_id: string; alerts: DestructiveAlert[]; count: number }> => {
+    return apiRequest<{ ds_id: string; alerts: DestructiveAlert[]; count: number }>(
+      `/agent/${dsId}/destructive-alerts?limit=${limit}`,
+    );
   },
 };
 

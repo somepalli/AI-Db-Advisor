@@ -51,6 +51,14 @@ class Settings(BaseModel):
     MCP_AUTO_EXECUTE: bool = False  # MUST be False
     MCP_REQUIRE_APPROVAL: bool = True  # MUST be True
 
+    # Demo mode: when True, MCP endpoints may fabricate illustrative suggestions /
+    # simulated approvals/executions if no MCP client is configured. Default False —
+    # with no MCP client and demo OFF, those endpoints return 503 instead of faking success.
+    DEMO_MODE: bool = os.getenv("DEMO_MODE", "false").lower() == "true"
+
+    # Where the durable approvals + append-only audit log live (SQLite).
+    APPROVALS_DB_FILE: str = os.getenv("APPROVALS_DB_FILE", "")
+
 settings = Settings()
 
 # Load datasources from persistence file

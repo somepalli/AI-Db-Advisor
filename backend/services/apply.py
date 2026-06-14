@@ -9,8 +9,19 @@ import re
 from psycopg import Connection
 from ..schemas import Suggestion, ApplyResult
 from .guardrails import validate_suggestion_for_apply
+from .agent_guardrails import evaluate as guardrail_evaluate, GuardrailDecision
 
 logger = logging.getLogger(__name__)
+
+# A pure read-only statement (SELECT / WITH ... SELECT / SHOW / EXPLAIN-no-ANALYZE).
+# Destructive verbs are already hard-DENIED by the wall before this is consulted,
+# so this only governs the benign UNKNOWN-but-read case on the human apply path.
+_READ_ONLY_PREFIX = re.compile(r"^\s*(WITH\b.*\bSELECT\b|SELECT\b|SHOW\b|EXPLAIN\b)",
+                               re.IGNORECASE | re.DOTALL)
+
+
+def _is_read_only(sql: str) -> bool:
+    return bool(_READ_ONLY_PREFIX.match(sql or ""))
 
 
 def generate_rollback_sql(suggestion: Suggestion) -> str | None:
@@ -56,7 +67,11 @@ def apply_suggestions(
     conn: Connection,
     suggestions: List[Suggestion],
     dry_run: bool,
-    db_type: str = "postgres"
+    db_type: str = "postgres",
+    is_agentic: bool = False,
+    elevated_confirmation: bool = False,
+    elevated_object_name: str | None = None,
+    ds_id: str | None = None,
 ) -> List[ApplyResult]:
     """
     Apply a batch of suggestions to the database.
@@ -66,6 +81,9 @@ def apply_suggestions(
         suggestions: List of suggestions to apply
         dry_run: If True, wrap in BEGIN/ROLLBACK for validation
         db_type: Database type (postgres, mysql, sqlserver, oracle, sqlite)
+        is_agentic: True when invoked by the autonomous agent loop (stricter wall)
+        elevated_confirmation: Caller explicitly confirmed an elevated-risk action
+        elevated_object_name: Typed object name accompanying the elevated confirmation
 
     Returns:
         List of ApplyResult for each suggestion
@@ -73,7 +91,13 @@ def apply_suggestions(
     results = []
 
     for suggestion in suggestions:
-        result = _apply_single_suggestion(conn, suggestion, dry_run, db_type)
+        result = _apply_single_suggestion(
+            conn, suggestion, dry_run, db_type,
+            is_agentic=is_agentic,
+            elevated_confirmation=elevated_confirmation,
+            elevated_object_name=elevated_object_name,
+            ds_id=ds_id,
+        )
         results.append(result)
 
     return results
@@ -83,7 +107,11 @@ def _apply_single_suggestion(
     conn: Connection,
     suggestion: Suggestion,
     dry_run: bool,
-    db_type: str = "postgres"
+    db_type: str = "postgres",
+    is_agentic: bool = False,
+    elevated_confirmation: bool = False,
+    elevated_object_name: str | None = None,
+    ds_id: str | None = None,
 ) -> ApplyResult:
     """
     Apply a single suggestion.
@@ -93,11 +121,66 @@ def _apply_single_suggestion(
         suggestion: Suggestion to apply
         dry_run: If True, rollback after execution
         db_type: Database type (postgres, mysql, sqlserver, oracle, sqlite)
+        is_agentic: True when invoked by the autonomous agent loop (stricter wall)
+        elevated_confirmation: Caller explicitly confirmed an elevated-risk action
+        elevated_object_name: Typed object name accompanying the elevated confirmation
 
     Returns:
         ApplyResult with status and details
     """
-    # Validate suggestion is safe to apply
+    # --- THE WALL (agent_guardrails) -------------------------------------
+    # Single hard gate, evaluated BEFORE any dry-run or real execution and
+    # BEFORE the legacy category-based safety check. Destructive/unknown
+    # statements never reach cursor.execute from any path.
+    wall_sql = (suggestion.sql_fix or "").strip()
+    if wall_sql:
+        wall = guardrail_evaluate(wall_sql, agentic=is_agentic)
+        if wall.decision is GuardrailDecision.DENY:
+            logger.warning(
+                f"Guardrail wall DENY for suggestion {suggestion.id}: "
+                f"{wall.matched_rule or wall.risk_class.value} :: {wall.reason}"
+            )
+            if wall.alert:
+                from .destructive_alerts import raise_destructive_blocked
+                raise_destructive_blocked(
+                    ds_id, wall_sql,
+                    matched_rule=wall.matched_rule,
+                    risk_class=wall.risk_class.value,
+                    reason=wall.reason,
+                    source="apply" + ("/agentic" if is_agentic else ""),
+                )
+            return ApplyResult(
+                id=suggestion.id,
+                status="error",
+                message=f"Blocked at guardrail wall: {wall.reason}",
+                rollback_sql=None,
+                alert=wall.alert,
+            )
+        if wall.decision is GuardrailDecision.REQUIRE_ELEVATED and not _is_read_only(wall_sql):
+            # Unclassified write (e.g. GRANT/DCL): only proceed with an explicit
+            # elevated confirmation AND a typed object name from the caller.
+            # Pure read-only SELECTs (rewrite suggestions) are not destructive
+            # and fall through to the legacy validator on the human path; on the
+            # agentic path they are already hard-DENIED above.
+            if not (elevated_confirmation and elevated_object_name
+                    and elevated_object_name.strip()):
+                logger.warning(
+                    f"Refusing elevated suggestion {suggestion.id} without "
+                    f"explicit confirmation + typed object name: {wall.reason}"
+                )
+                return ApplyResult(
+                    id=suggestion.id,
+                    status="error",
+                    message=(
+                        "Elevated review required: this statement could not be "
+                        "positively classified and needs explicit confirmation "
+                        "with a typed object name before it can be applied."
+                    ),
+                    rollback_sql=None,
+                    alert=wall.alert,
+                )
+
+    # Validate suggestion is safe to apply (legacy category-based check)
     can_apply, reason = validate_suggestion_for_apply(
         suggestion.id,
         suggestion.sql_fix or "",
@@ -232,7 +315,11 @@ def apply_suggestion_batch(
     suggestions: List[Suggestion],
     dry_run: bool,
     stop_on_error: bool = False,
-    db_type: str = "postgres"
+    db_type: str = "postgres",
+    is_agentic: bool = False,
+    elevated_confirmation: bool = False,
+    elevated_object_name: str | None = None,
+    ds_id: str | None = None,
 ) -> List[ApplyResult]:
     """
     Apply multiple suggestions with optional error handling.
@@ -243,6 +330,9 @@ def apply_suggestion_batch(
         dry_run: If True, validate but don't commit
         stop_on_error: If True, stop on first error
         db_type: Database type (postgres, mysql, sqlserver, oracle, sqlite)
+        is_agentic: True when invoked by the autonomous agent loop (stricter wall)
+        elevated_confirmation: Caller explicitly confirmed an elevated-risk action
+        elevated_object_name: Typed object name accompanying the elevated confirmation
 
     Returns:
         List of ApplyResult for each suggestion
@@ -250,7 +340,13 @@ def apply_suggestion_batch(
     results = []
 
     for suggestion in suggestions:
-        result = _apply_single_suggestion(conn, suggestion, dry_run, db_type)
+        result = _apply_single_suggestion(
+            conn, suggestion, dry_run, db_type,
+            is_agentic=is_agentic,
+            elevated_confirmation=elevated_confirmation,
+            elevated_object_name=elevated_object_name,
+            ds_id=ds_id,
+        )
         results.append(result)
 
         # Stop on first error if requested

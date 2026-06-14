@@ -6,12 +6,13 @@ import { AIAssistant } from './components/AIAssistant';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import AlertPanel from './components/AlertPanel';
 import { AlertRulesPanel } from './components/AlertRulesPanel';
+import { AgentPanel } from './components/AgentPanel';
 import { Separator } from './components/ui/separator';
 import { LLMStatusBadge } from './components/LLMStatusBadge';
 import { OptimizationProvider } from './lib/optimizationContext';
 import { datasourcesApi, type DataSource } from './api/client';
 
-type ViewType = 'query' | 'analytics' | 'alerts';
+type ViewType = 'query' | 'analytics' | 'alerts' | 'agent';
 
 function App() {
   const [selectedDataSource, setSelectedDataSource] = useState<string | null>(null);
@@ -96,6 +97,16 @@ function App() {
           >
             🔔 Alerts
           </button>
+          <button
+            onClick={() => setCurrentView('agent')}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+              currentView === 'agent'
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-muted text-muted-foreground hover:bg-muted/80'
+            }`}
+          >
+            🤖 Agent
+          </button>
         </div>
 
         <div className="flex items-center gap-3">
@@ -107,7 +118,10 @@ function App() {
       </header>
 
       {/* Main Content */}
-      {currentView === 'alerts' ? (
+      {currentView === 'agent' ? (
+        /* Agentic DBA View */
+        <AgentPanel />
+      ) : currentView === 'alerts' ? (
         /* Alerts View */
         <div className="flex-1 overflow-auto bg-background">
           <AlertPanel />
