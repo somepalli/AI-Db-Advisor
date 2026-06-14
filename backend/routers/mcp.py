@@ -50,11 +50,13 @@ def _screen_and_register(ds_id: str, suggestions: List[Dict[str, Any]]) -> List[
                     source="mcp_router",
                 )
             continue
+        # Set risk_class BEFORE persisting so the stored record (returned by
+        # /pending) carries it for the UI badge + typed-confirmation gate.
+        s["risk_class"] = wall.risk_class.value
         # Submit for approval to obtain a real, persisted approval_id.
         approval_id = workflow.submit_for_approval(s)
         s["approval_id"] = approval_id
         s["status"] = "pending_approval"
-        s["risk_class"] = wall.risk_class.value
         kept.append(s)
     return kept
 

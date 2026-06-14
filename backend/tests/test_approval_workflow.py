@@ -101,7 +101,11 @@ class TestScreeningDropsDestructive:
         assert [s["id"] for s in kept] == ["good"]
         assert kept[0]["approval_id"].startswith("approval-")
         # The kept one is persisted as PENDING; the destructive one never was.
-        assert len(store.list_by_status("pg-3", "pending")) == 1
+        pending = store.list_by_status("pg-3", "pending")
+        assert len(pending) == 1
+        # risk_class must be PERSISTED (not just on the HTTP response) so the UI
+        # badge + typed-confirmation gate work off /pending.
+        assert pending[0]["suggestion"]["risk_class"] == "impactful_write"
         # A destructive_blocked audit event was recorded.
         actions = [a["action"] for a in store.get_audit()]
         assert "destructive_blocked" in actions
