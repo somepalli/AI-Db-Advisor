@@ -75,8 +75,20 @@ CREATE TABLE IF NOT EXISTS audit_log (
     action      TEXT NOT NULL,
     detail_json TEXT
 );
+CREATE TABLE IF NOT EXISTS scan_findings (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT NOT NULL,
+    ds_id       TEXT NOT NULL,
+    scan_id     TEXT,
+    status      TEXT NOT NULL,
+    top_finding TEXT,
+    approval_ids_json TEXT,
+    blocked_count INTEGER DEFAULT 0,
+    trace_length  INTEGER DEFAULT 0
+);
 CREATE INDEX IF NOT EXISTS idx_approvals_ds_status ON approvals(ds_id, status);
 CREATE INDEX IF NOT EXISTS idx_audit_approval ON audit_log(approval_id);
+CREATE INDEX IF NOT EXISTS idx_scan_findings_ds ON scan_findings(ds_id, ts DESC);
 """
 
 
@@ -286,6 +298,86 @@ def get_audit(approval_id: Optional[str] = None, limit: int = 200) -> List[Dict[
 
 
 # --- retention ---------------------------------------------------------------
+
+def record_scan_finding(
+    ds_id: str,
+    scan_id: str,
+    status: str,
+    top_finding: Optional[str],
+    approval_ids: list,
+    blocked_count: int = 0,
+    trace_length: int = 0,
+) -> None:
+    """Append one row to scan_findings; used by the agent for institutional memory."""
+    with _LOCK:
+        conn = _connect()
+        try:
+            conn.execute(
+                """INSERT INTO scan_findings
+                   (ts, ds_id, scan_id, status, top_finding, approval_ids_json, blocked_count, trace_length)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    datetime.utcnow().isoformat(), ds_id, scan_id, status,
+                    top_finding, json.dumps(approval_ids), blocked_count, trace_length,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def get_scan_findings(ds_id: str, limit: int = 5) -> List[Dict[str, Any]]:
+    """Return the most recent scan findings for a datasource (agent memory)."""
+    with _LOCK:
+        conn = _connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM scan_findings WHERE ds_id = ? ORDER BY ts DESC LIMIT ?",
+                (ds_id, limit),
+            ).fetchall()
+            return [
+                {
+                    "ts": r["ts"],
+                    "ds_id": r["ds_id"],
+                    "scan_id": r["scan_id"],
+                    "status": r["status"],
+                    "top_finding": r["top_finding"],
+                    "approval_ids": json.loads(r["approval_ids_json"]) if r["approval_ids_json"] else [],
+                    "blocked_count": r["blocked_count"],
+                    "trace_length": r["trace_length"],
+                }
+                for r in rows
+            ]
+        finally:
+            conn.close()
+
+
+def get_audit_log(ds_id: Optional[str] = None, limit: int = 200) -> List[Dict[str, Any]]:
+    """Return audit entries across all DSes or filtered to one DS, newest first."""
+    with _LOCK:
+        conn = _connect()
+        try:
+            if ds_id:
+                rows = conn.execute(
+                    "SELECT * FROM audit_log WHERE ds_id = ? ORDER BY id DESC LIMIT ?",
+                    (ds_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)
+                ).fetchall()
+            return [
+                {
+                    "id": r["id"], "ts": r["ts"], "ds_id": r["ds_id"],
+                    "approval_id": r["approval_id"], "actor": r["actor"],
+                    "action": r["action"],
+                    "detail": json.loads(r["detail_json"]) if r["detail_json"] else None,
+                }
+                for r in rows
+            ]
+        finally:
+            conn.close()
+
 
 def cleanup_old_records(days: int = 30) -> int:
     """

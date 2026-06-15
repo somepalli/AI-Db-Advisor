@@ -22,9 +22,23 @@ function App() {
   const [datasources, setDatasources] = useState<Record<string, DataSource>>({});
   const [loadingDatasources, setLoadingDatasources] = useState(false);
 
-  // Load datasources for Analytics dropdown
+  // Track which views have ever been activated so we can lazy-mount them.
+  // Once mounted, a view is NEVER unmounted — only hidden with CSS.
+  // This prevents the re-initialization loading flash and preserves in-flight
+  // scan state in AgentPanel when the user navigates to another tab.
+  const [mountedViews, setMountedViews] = useState<Set<ViewType>>(new Set<ViewType>(['query']));
+
+  const switchView = (view: ViewType) => {
+    setCurrentView(view);
+    setMountedViews((prev) => {
+      if (prev.has(view)) return prev;
+      return new Set([...prev, view]);
+    });
+  };
+
+  // Load datasources for Analytics dropdown (only on first activation).
   useEffect(() => {
-    if (currentView === 'analytics') {
+    if (currentView === 'analytics' && Object.keys(datasources).length === 0) {
       loadDatasources();
     }
   }, [currentView]);
@@ -67,46 +81,27 @@ function App() {
 
         {/* View Toggle Buttons */}
         <div className="flex gap-2">
-          <button
-            onClick={() => setCurrentView('query')}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              currentView === 'query'
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:bg-muted/80'
-            }`}
-          >
-            Query Analyzer
-          </button>
-          <button
-            onClick={() => setCurrentView('analytics')}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              currentView === 'analytics'
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:bg-muted/80'
-            }`}
-          >
-            📊 Analytics
-          </button>
-          <button
-            onClick={() => setCurrentView('alerts')}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              currentView === 'alerts'
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:bg-muted/80'
-            }`}
-          >
-            🔔 Alerts
-          </button>
-          <button
-            onClick={() => setCurrentView('agent')}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              currentView === 'agent'
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:bg-muted/80'
-            }`}
-          >
-            🤖 Agent
-          </button>
+          {(
+            [
+              { id: 'query',     label: 'Query Analyzer' },
+              { id: 'analytics', label: '📊 Analytics' },
+              { id: 'alerts',    label: '🔔 Alerts' },
+              { id: 'agent',     label: '🤖 Agent' },
+            ] as const
+          ).map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => switchView(id)}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                currentView === id
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         <div className="flex items-center gap-3">
@@ -117,56 +112,59 @@ function App() {
         </div>
       </header>
 
-      {/* Main Content */}
-      {currentView === 'agent' ? (
-        /* Agentic DBA View */
-        <AgentPanel />
-      ) : currentView === 'alerts' ? (
-        /* Alerts View */
-        <div className="flex-1 overflow-auto bg-background">
-          <AlertPanel />
-          <AlertRulesPanel dataSourceId={selectedDataSource} />
-        </div>
-      ) : currentView === 'query' ? (
-        <div className="flex-1 flex overflow-hidden">
-          {/* Column 1: Object Explorer (connections + nested schema tree) */}
-          <div className="w-96 border-r border-border flex flex-col bg-card">
-            <ConnectionPanel
-              onSelectDataSource={handleSelectDataSource}
-              selectedDataSource={selectedDataSource}
-            />
-          </div>
+      {/* Main Content — all views are lazy-mounted once visited, then kept mounted.
+           Only the active view is visible (display != none). This prevents the
+           re-initialisation loading flash and preserves in-flight scan state when
+           switching away from the Agent tab and back. */}
 
-          <Separator orientation="vertical" />
+      {/* ── Query Analyzer ── */}
+      <div
+        className="flex-1 flex overflow-hidden"
+        style={{ display: currentView === 'query' ? undefined : 'none' }}
+      >
+        {mountedViews.has('query') && (
+          <>
+            <div className="w-96 border-r border-border flex flex-col bg-card">
+              <ConnectionPanel
+                onSelectDataSource={handleSelectDataSource}
+                selectedDataSource={selectedDataSource}
+              />
+            </div>
 
-          {/* Column 2: SQL Editor */}
-          <div className="flex-1 flex flex-col bg-background">
-            {selectedDataSource ? (
-              <SQLEditorWithAutocomplete dataSourceId={selectedDataSource} />
-            ) : (
-              <div className="flex-1 flex items-center justify-center">
-                <div className="text-center">
-                  <Database className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
-                  <h2 className="text-lg font-semibold mb-2">SQL Editor</h2>
-                  <p className="text-sm text-muted-foreground">
-                    Select a connection to start writing queries
-                  </p>
+            <Separator orientation="vertical" />
+
+            <div className="flex-1 flex flex-col bg-background">
+              {selectedDataSource ? (
+                <SQLEditorWithAutocomplete dataSourceId={selectedDataSource} />
+              ) : (
+                <div className="flex-1 flex items-center justify-center">
+                  <div className="text-center">
+                    <Database className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
+                    <h2 className="text-lg font-semibold mb-2">SQL Editor</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Select a connection to start writing queries
+                    </p>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
 
-          <Separator orientation="vertical" />
+            <Separator orientation="vertical" />
 
-          {/* Column 4: AI Assistant */}
-          <div className="w-[34rem] border-l border-border flex flex-col bg-card">
-            <AIAssistant dataSourceId={selectedDataSource} />
-          </div>
-        </div>
-      ) : (
-        /* Analytics View */
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {pgDataSource && chDataSource ? (
+            <div className="w-[34rem] border-l border-border flex flex-col bg-card">
+              <AIAssistant dataSourceId={selectedDataSource} />
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ── Analytics ── */}
+      <div
+        className="flex-1 flex flex-col overflow-hidden"
+        style={{ display: currentView === 'analytics' ? undefined : 'none' }}
+      >
+        {mountedViews.has('analytics') && (
+          pgDataSource && chDataSource ? (
             <AnalyticsDashboard
               pgDataSourceId={pgDataSource}
               chDataSourceId={chDataSource}
@@ -186,7 +184,6 @@ function App() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {/* PostgreSQL Datasource Dropdown */}
                     <div>
                       <label className="block text-sm font-medium mb-2">
                         PostgreSQL Source Database
@@ -198,9 +195,7 @@ function App() {
                       >
                         <option value="">Select PostgreSQL datasource...</option>
                         {pgDatasources.map(([id, ds]) => (
-                          <option key={id} value={id}>
-                            {id} ({ds.engine})
-                          </option>
+                          <option key={id} value={id}>{id} ({ds.engine})</option>
                         ))}
                       </select>
                       {pgDatasources.length === 0 && (
@@ -210,7 +205,6 @@ function App() {
                       )}
                     </div>
 
-                    {/* DuckDB Datasource Dropdown */}
                     <div>
                       <label className="block text-sm font-medium mb-2">
                         DuckDB Analytics Database
@@ -222,9 +216,7 @@ function App() {
                       >
                         <option value="">Select DuckDB datasource...</option>
                         {duckdbDatasources.map(([id, ds]) => (
-                          <option key={id} value={id}>
-                            {id} ({ds.engine})
-                          </option>
+                          <option key={id} value={id}>{id} ({ds.engine})</option>
                         ))}
                       </select>
                       {duckdbDatasources.length === 0 && (
@@ -235,12 +227,8 @@ function App() {
                     </div>
 
                     <button
-                      onClick={() => {
-                        if (pgDataSource && chDataSource) {
-                          // Trigger re-render
-                          setCurrentView('analytics');
-                        }
-                      }}
+                      type="button"
+                      onClick={() => pgDataSource && chDataSource && switchView('analytics')}
                       disabled={!pgDataSource || !chDataSource}
                       className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -248,6 +236,7 @@ function App() {
                     </button>
 
                     <button
+                      type="button"
                       onClick={loadDatasources}
                       className="w-full px-4 py-2 border border-border rounded-lg font-medium hover:bg-muted transition-colors"
                     >
@@ -257,9 +246,30 @@ function App() {
                 )}
               </div>
             </div>
-          )}
-        </div>
-      )}
+          )
+        )}
+      </div>
+
+      {/* ── Alerts ── */}
+      <div
+        className="flex-1 overflow-auto bg-background"
+        style={{ display: currentView === 'alerts' ? undefined : 'none' }}
+      >
+        {mountedViews.has('alerts') && (
+          <>
+            <AlertPanel />
+            <AlertRulesPanel dataSourceId={selectedDataSource} />
+          </>
+        )}
+      </div>
+
+      {/* ── Agent ── */}
+      <div
+        className="flex-1 overflow-auto bg-background"
+        style={{ display: currentView === 'agent' ? undefined : 'none' }}
+      >
+        {mountedViews.has('agent') && <AgentPanel />}
+      </div>
     </div>
     </OptimizationProvider>
   );
