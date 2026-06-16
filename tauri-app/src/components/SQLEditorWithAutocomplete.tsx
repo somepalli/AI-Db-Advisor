@@ -90,15 +90,19 @@ export function SQLEditorWithAutocomplete({ dataSourceId, onQueryExecute, onCopy
         });
       }
 
-      // Check for invalid table names (if schema is loaded)
+      // Check for invalid table names (if schema is loaded). Schema keys are
+      // schema-qualified (e.g. "public.orders"), but users type the bare name
+      // (e.g. "orders"), so compare against the unqualified form on both sides.
       if (schema) {
-        const tableNames = Object.keys(schema.tables);
+        const tableNames = new Set(
+          Object.keys(schema.tables).map((t) => t.split('.').pop()!.toLowerCase())
+        );
         const fromMatch = line.match(/FROM\s+(\w+)/i);
         const joinMatch = line.match(/JOIN\s+(\w+)/i);
 
         if (fromMatch && fromMatch[1]) {
           const tableName = fromMatch[1];
-          if (!tableNames.includes(tableName) && !tableName.match(/^\d/)) {
+          if (!tableNames.has(tableName.toLowerCase()) && !tableName.match(/^\d/)) {
             const tableStart = position + line.indexOf(tableName);
             errors.push({
               start: tableStart,
@@ -110,7 +114,7 @@ export function SQLEditorWithAutocomplete({ dataSourceId, onQueryExecute, onCopy
 
         if (joinMatch && joinMatch[1]) {
           const tableName = joinMatch[1];
-          if (!tableNames.includes(tableName) && !tableName.match(/^\d/)) {
+          if (!tableNames.has(tableName.toLowerCase()) && !tableName.match(/^\d/)) {
             const tableStart = position + line.indexOf(tableName);
             errors.push({
               start: tableStart,

@@ -152,14 +152,22 @@ def _build_warm_start(agent: Any, ds_id: str = "") -> str:
             sections.append(f"=== {label} ===\n(unavailable: {e})")
 
     # Inject institutional memory from past scans so the agent can avoid
-    # re-proposing already-approved fixes or spot recurring issues.
+    # re-proposing already-approved fixes or spot recurring blocked issues.
+    # Only ACTIONABLE history (something was approved or blocked) is injected —
+    # a past "no actionable issue found" finish is not evidence of anything and
+    # must not bias today's read of fresh metadata, or the agent self-reinforces
+    # into always saying "no issue" regardless of current state.
     if ds_id:
         try:
             from .approval_store import get_scan_findings
-            past = get_scan_findings(ds_id, limit=4)
-            if past:
+            past = get_scan_findings(ds_id, limit=8)
+            actionable = [
+                p for p in past
+                if (p.get("approval_ids") or p.get("blocked_count", 0))
+            ][:4]
+            if actionable:
                 mem_lines = []
-                for p in past:
+                for p in actionable:
                     finding = p.get("top_finding") or "(no finding)"
                     n_approved = len(p.get("approval_ids") or [])
                     n_blocked = p.get("blocked_count", 0)
@@ -169,9 +177,12 @@ def _build_warm_start(agent: Any, ds_id: str = "") -> str:
                         f"finding: {finding[:120]}"
                     )
                 sections.append(
-                    "=== PAST SCAN FINDINGS (institutional memory) ===\n"
-                    "Use this context to avoid re-proposing already approved changes\n"
-                    "and to escalate if the same issue recurs:\n"
+                    "=== PAST ACTIONABLE FINDINGS (institutional memory) ===\n"
+                    "Use this ONLY to avoid re-proposing changes already approved below\n"
+                    "and to escalate if the same blocked issue recurs. This list excludes\n"
+                    "prior \"no issue found\" runs on purpose — re-evaluate the fresh metadata\n"
+                    "below independently each time; do not assume past inaction means there is\n"
+                    "still nothing to fix:\n"
                     + "\n".join(mem_lines)
                 )
         except Exception:
