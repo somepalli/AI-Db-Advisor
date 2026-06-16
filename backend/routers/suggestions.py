@@ -209,11 +209,11 @@ def apply_suggestions_endpoint(body: ApplySuggestionsRequest):
             try:
                 if isinstance(agent, PostgresAgent):
                     with agent._conn() as conn:
-                        apply_results = apply_suggestions(conn, stored_suggestions, body.dry_run, db_type)
+                        apply_results = apply_suggestions(conn, stored_suggestions, body.dry_run, db_type, ds_id=body.ds_id)
                 else:
                     conn = agent._conn()
                     try:
-                        apply_results = apply_suggestions(conn, stored_suggestions, body.dry_run, db_type)
+                        apply_results = apply_suggestions(conn, stored_suggestions, body.dry_run, db_type, ds_id=body.ds_id)
                     finally:
                         conn.close()
             except Exception as e:
@@ -320,11 +320,11 @@ def apply_suggestions_direct(body: ApplySuggestionsDirectRequest):
 
         if isinstance(agent, PostgresAgent):
             with agent._conn() as conn:
-                results = apply_suggestions(conn, body.suggestions, body.dry_run, db_type)
+                results = apply_suggestions(conn, body.suggestions, body.dry_run, db_type, ds_id=body.ds_id)
         else:
             conn = agent._conn()
             try:
-                results = apply_suggestions(conn, body.suggestions, body.dry_run, db_type)
+                results = apply_suggestions(conn, body.suggestions, body.dry_run, db_type, ds_id=body.ds_id)
             finally:
                 conn.close()
 
@@ -334,7 +334,8 @@ def apply_suggestions_direct(body: ApplySuggestionsDirectRequest):
                 id=r.id,
                 status=r.status,
                 message=r.message,
-                rollback_sql=r.rollback_sql
+                rollback_sql=r.rollback_sql,
+                alert=r.alert,
             ) for r in results
         ]
 

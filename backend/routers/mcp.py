@@ -16,10 +16,49 @@ from datetime import datetime
 from ..services.mcp_orchestrator import MCPOrchestrator
 from ..services.approval_workflow import get_workflow
 from ..services.mcp_client import get_mcp_client
+from ..services import approval_store
+from ..services import destructive_alerts
+from ..services.agent_guardrails import evaluate as guardrail_evaluate, GuardrailDecision
 from ..deps import resolve_agent
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/mcp", tags=["mcp"])
+
+
+def _screen_and_register(ds_id: str, suggestions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Run every suggestion through the guardrail wall, drop+alert any DENY, and
+    submit the survivors for approval so each carries a REAL persisted approval_id.
+    """
+    workflow = get_workflow(ds_id)
+    kept: List[Dict[str, Any]] = []
+    for s in suggestions:
+        sql = (s.get("sql") or "")
+        wall = guardrail_evaluate(sql, agentic=True)
+        if wall.decision is GuardrailDecision.DENY:
+            logger.warning(
+                f"Guardrail wall DENY — dropping suggestion for {ds_id}: "
+                f"{wall.matched_rule or wall.risk_class.value} :: {sql[:80]!r}"
+            )
+            if wall.alert:
+                destructive_alerts.raise_destructive_blocked(
+                    ds_id, sql,
+                    matched_rule=wall.matched_rule,
+                    risk_class=wall.risk_class.value,
+                    reason=wall.reason,
+                    source="mcp_router",
+                )
+            continue
+        # Set risk_class BEFORE persisting so the stored record (returned by
+        # /pending) carries it for the UI badge + typed-confirmation gate.
+        s["risk_class"] = wall.risk_class.value
+        # Submit for approval to obtain a real, persisted approval_id.
+        approval_id = workflow.submit_for_approval(s)
+        s["approval_id"] = approval_id
+        s["status"] = "pending_approval"
+        kept.append(s)
+    return kept
 
 
 # Request/Response Schemas
@@ -124,15 +163,24 @@ async def request_mcp_suggestions(
     try:
         logger.info(f"MCP suggestion request for {ds_id}: type={request.optimization_type}")
 
-        # Check if MCP is enabled - if not, provide demo suggestions
+        # Check if MCP is enabled - if not, only fall back to demo when explicitly enabled.
         mcp_client = get_mcp_client()
-        use_demo_mode = mcp_client is None
+        use_demo_mode = mcp_client is None and settings.DEMO_MODE
 
-        # Generate suggestions (demo mode if MCP not configured)
+        if mcp_client is None and not settings.DEMO_MODE:
+            # No real MCP client and demo mode is off → refuse rather than fake success.
+            raise HTTPException(
+                status_code=503,
+                detail="MCP is not configured and demo mode is disabled. "
+                       "Set MCP_ENABLED + a bridge, or DEMO_MODE=true to use illustrative suggestions.",
+            )
+
+        # Generate suggestions (demo mode if MCP not configured but DEMO_MODE on)
         if use_demo_mode:
-            logger.info(f"Using DEMO mode for MCP suggestions (MCP not configured)")
-            # In demo mode, we don't need to verify datasource exists
-            suggestions = _generate_demo_suggestions(ds_id, request)
+            logger.info(f"Using DEMO mode for MCP suggestions (MCP not configured, DEMO_MODE on)")
+            # In demo mode, we don't need to verify datasource exists.
+            # Screen + register so demo suggestions carry real persisted approval IDs.
+            suggestions = _screen_and_register(ds_id, _generate_demo_suggestions(ds_id, request))
         else:
             # Verify datasource exists (only needed for real MCP mode)
             try:
@@ -143,7 +191,7 @@ async def request_mcp_suggestions(
                     detail=f"Datasource not found: {ds_id}"
                 )
 
-            # Create orchestrator
+            # Create orchestrator (screens + submits real, persisted approvals internally)
             orchestrator = MCPOrchestrator(ds_id)
 
             # Request suggestions
@@ -204,9 +252,9 @@ async def approve_mcp_suggestion(
     try:
         logger.info(f"Approval request: {approval_id} by {user_id}")
 
-        # DEMO MODE: In demo mode, just return success
+        # DEMO MODE: only short-circuit when demo is explicitly enabled.
         mcp_client = get_mcp_client()
-        if mcp_client is None:
+        if mcp_client is None and settings.DEMO_MODE:
             logger.info(f"DEMO MODE: Approving {approval_id}")
             return ApprovalResponse(
                 success=True,
@@ -340,9 +388,9 @@ async def execute_approved_suggestion(
     try:
         logger.info(f"Execution request: {approval_id} by {user_id}")
 
-        # DEMO MODE: In demo mode, simulate successful execution
+        # DEMO MODE: only simulate execution when demo is explicitly enabled.
         mcp_client = get_mcp_client()
-        if mcp_client is None:
+        if mcp_client is None and settings.DEMO_MODE:
             logger.info(f"DEMO MODE: Simulating execution of {approval_id}")
             return ExecutionResponse(
                 success=True,

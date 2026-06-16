@@ -14,6 +14,11 @@ from datetime import datetime
 from .mcp_client import MCPClient, MCPToolMode, MCPToolCategory, get_mcp_client
 from .safety_validator import SafetyValidator, RiskLevel
 from .approval_workflow import ApprovalWorkflow, get_workflow
+from . import approval_store
+from . import destructive_alerts
+from . import apply as apply_service
+from .agent_guardrails import evaluate as guardrail_evaluate, GuardrailDecision
+from ..schemas import Suggestion
 from ..deps import resolve_agent
 
 logger = logging.getLogger(__name__)
@@ -123,6 +128,25 @@ class MCPOrchestrator:
 
                     # Validate suggestion for safety
                     validation_result = await self._validate_and_prepare(suggestion)
+
+                    # Guardrail WALL: destructive/unknown statements are dropped
+                    # before they can ever be queued for approval.
+                    sql = (validation_result["suggestion"].get("sql") or "")
+                    wall = guardrail_evaluate(sql, agentic=True)
+                    if wall.decision is GuardrailDecision.DENY:
+                        logger.warning(
+                            f"Guardrail wall DENY — dropping MCP suggestion {suggestion.get('id')}: "
+                            f"{wall.matched_rule or wall.risk_class.value}"
+                        )
+                        if wall.alert:
+                            destructive_alerts.raise_destructive_blocked(
+                                self.ds_id, sql,
+                                matched_rule=wall.matched_rule,
+                                risk_class=wall.risk_class.value,
+                                reason=wall.reason,
+                                source="mcp_orchestrator",
+                            )
+                        continue
 
                     if validation_result["is_valid"]:
                         # Submit for user approval
@@ -278,27 +302,40 @@ class MCPOrchestrator:
 
         # Get suggestion
         suggestion = approval_record["suggestion"]
+        sug = self._suggestion_from_mcp(suggestion)
 
         # Mark as executing
         self.workflow.mark_executing(approval_id)
 
         try:
-            # Execute via database agent
             agent = resolve_agent(self.ds_id)
-            sql = suggestion["sql"]
+            db_type = self._db_type(agent)
 
-            logger.info(f"Executing approved SQL: {sql[:100]}...")
+            logger.info(f"Executing approved SQL via apply.py (agentic): {sug.sql_fix[:100]}...")
 
-            # Execute SQL
-            # Note: Actual execution would use agent's execute method
-            # For safety, we're showing the structure here
-            execution_result = await self._execute_sql_safely(agent, sql)
+            # Phase 1: DRY-RUN (BEGIN…ROLLBACK) through the guardrail-walled apply path.
+            dry = self._run_apply(agent, sug, dry_run=True, db_type=db_type)
+            if dry.status != "success":
+                self.workflow.mark_failed(approval_id, error=f"Dry-run failed: {dry.message}")
+                raise ValueError(f"Dry-run validation failed, real execution blocked: {dry.message}")
 
-            # Mark as executed
+            # Phase 2: REAL execution — only because the dry-run passed.
+            real = self._run_apply(agent, sug, dry_run=False, db_type=db_type)
+            if real.status != "success":
+                self.workflow.mark_failed(approval_id, error=real.message)
+                raise ValueError(f"Execution failed: {real.message}")
+
+            execution_result = {
+                "sql": sug.sql_fix,
+                "status": real.status,
+                "message": real.message,
+                "dry_run_validated": True,
+            }
             self.workflow.mark_executed(
                 approval_id,
                 execution_result=execution_result,
-                rollback_available=False  # Would check if transaction-based
+                rollback_available=bool(real.rollback_sql),
+                rollback_sql=real.rollback_sql,
             )
 
             logger.info(f"Execution successful: {approval_id}")
@@ -306,42 +343,79 @@ class MCPOrchestrator:
             return {
                 "success": True,
                 "approval_id": approval_id,
-                "suggestion_id": suggestion["id"],
+                "suggestion_id": suggestion.get("id", approval_id),
                 "result": execution_result,
-                "executed_at": datetime.utcnow().isoformat()
+                "executed_at": datetime.utcnow().isoformat(),
             }
 
         except Exception as e:
-            # Mark as failed
-            self.workflow.mark_failed(approval_id, error=str(e))
-
+            # Ensure the record is marked failed (idempotent if already failed above).
+            try:
+                rec = self.workflow.get_approval_by_id(approval_id)
+                if rec and rec["status"] == "executing":
+                    self.workflow.mark_failed(approval_id, error=str(e))
+            except Exception:
+                pass
             logger.error(f"Execution failed: {approval_id} - {e}")
-
             raise
 
-    async def _execute_sql_safely(
-        self,
-        agent: Any,
-        sql: str
-    ) -> Dict[str, Any]:
+    def _suggestion_from_mcp(self, mcp: Dict[str, Any]) -> Suggestion:
         """
-        Execute SQL with safety measures.
+        Convert a stored MCP suggestion dict into a Suggestion for apply.py.
 
-        Args:
-            agent: Database agent
-            sql: SQL statement
-
-        Returns:
-            Execution result
+        risk is set to "low" deliberately: the agent_guardrails WALL plus the
+        explicit two-phase (dry-run then real) execution are the real safety
+        gate here, so the legacy validator's "dry-run first" requirement (which
+        would otherwise block the real commit for medium/high risk) is already
+        satisfied by construction.
         """
-        # This would be implemented with actual database execution
-        # For now, return placeholder
-        return {
-            "sql": sql,
-            "rows_affected": 0,
-            "execution_time_ms": 0,
-            "note": "Execution placeholder - implement with actual agent"
-        }
+        sql = (mcp.get("sql") or "")
+        valid = {"index", "rewrite", "config", "partition", "cleanup", "note"}
+        category = mcp.get("category")
+        if category not in valid:
+            up = sql.strip().upper()
+            category = "index" if up.startswith(("CREATE INDEX", "CREATE UNIQUE INDEX")) else "config"
+        return Suggestion(
+            id=mcp.get("id") or mcp.get("approval_id") or "mcp-suggestion",
+            level="table",
+            category=category,
+            title=mcp.get("description") or "MCP suggestion",
+            summary=mcp.get("rationale") or mcp.get("description") or "",
+            sql_fix=sql,
+            validated=True,
+            confidence="validated",
+            risk="low",
+            related_objects=mcp.get("tables_affected") or [],
+            metadata={},
+        )
+
+    def _db_type(self, agent: Any) -> str:
+        db_type = ""
+        if hasattr(agent, "get_db_type"):
+            try:
+                db_type = (agent.get_db_type() or "").lower()
+            except Exception:
+                db_type = ""
+        if not db_type:
+            db_type = agent.__class__.__name__.replace("Agent", "").lower()
+        return db_type or "unknown"
+
+    def _run_apply(self, agent: Any, sug: Suggestion, *, dry_run: bool, db_type: str):
+        """Open a connection the way the agent expects and run the walled apply."""
+        if agent.__class__.__name__ == "PostgresAgent":
+            with agent._conn() as conn:
+                results = apply_service.apply_suggestions(
+                    conn, [sug], dry_run, db_type, is_agentic=True, ds_id=self.ds_id
+                )
+        else:
+            conn = agent._conn()
+            try:
+                results = apply_service.apply_suggestions(
+                    conn, [sug], dry_run, db_type, is_agentic=True, ds_id=self.ds_id
+                )
+            finally:
+                conn.close()
+        return results[0]
 
     def get_pending_suggestions(self) -> List[Dict[str, Any]]:
         """
