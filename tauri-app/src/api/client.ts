@@ -504,6 +504,8 @@ export interface MCPSuggestion {
   description: string;
   rationale: string;
   category: string;
+  /** Guardrail-wall classification (Stage 6): metadata_read | safe_write | impactful_write. */
+  risk_class?: 'metadata_read' | 'safe_write' | 'impactful_write' | 'destructive' | 'unknown';
   risk_level: 'low' | 'medium' | 'high' | 'critical';
   impact_level?: 'minimal' | 'moderate' | 'significant' | 'massive';
   warnings: string[];
@@ -636,6 +638,151 @@ export const mcpApi = {
   // Health check
   healthCheck: async (): Promise<any> => {
     return apiRequest<any>('/mcp/health');
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Agent API (Stage 6) — bounded, metadata-only investigation loop + alarms
+// ---------------------------------------------------------------------------
+export interface AgentTraceStep {
+  step?: number;
+  action: string;            // tool | propose_queued | propose_blocked | finish | halt | error | ...
+  tool?: string;
+  input?: any;
+  observation?: string;
+  sql?: string;
+  rationale?: string;
+  approval_id?: string;
+  risk_class?: string;
+  reason?: string;
+  alert?: boolean;
+  summary?: string;
+  detail?: string;
+}
+
+export interface InvestigateRequest {
+  goal: string;
+  max_iters?: number;
+  token_budget?: number;
+}
+
+export interface InvestigateResponse {
+  ds_id: string;
+  goal: string;
+  iterations: number;
+  trace: AgentTraceStep[];
+  approval_ids: string[];
+  blocked: Array<{ sql: string; reason: string; rule?: string; alert?: boolean }>;
+}
+
+export interface AuditEntry {
+  id: number;
+  ts: string;
+  ds_id: string | null;
+  approval_id: string | null;
+  actor: string | null;
+  action: string;
+  detail: Record<string, any> | null;
+}
+
+export interface DestructiveAlert {
+  id: string;
+  alert_class: string;       // "DESTRUCTIVE_BLOCKED"
+  ts: string;
+  ds_id: string | null;
+  matched_rule: string | null;
+  risk_class: string | null;
+  statement: string;
+  reason: string;
+  actor?: string | null;
+  source?: string | null;
+}
+
+// Autonomous scan types
+export interface ScanAllRequest {
+  max_iters_per_ds?: number;
+  token_budget_per_ds?: number;
+}
+
+export interface ScanAllResponse {
+  scan_id: string;
+  started_at: string;
+  ds_count: number;
+  message: string;
+}
+
+export interface ScanStatusResponse {
+  scanning: boolean;
+  scan_id: string | null;
+  in_progress: string[];
+  completed: string[];
+  failed: string[];
+  started_at: string | null;
+  finished_at: string | null;
+  elapsed_s: number | null;
+  step_info: Record<string, string>;  // ds_id → "step N: tool_name"
+}
+
+export interface PerDsResultSummary {
+  ds_id: string;
+  status: string;           // "ok" | "approved" | "blocked" | "error" | "no_finding"
+  last_scanned_at: string | null;
+  top_finding: string | null;
+  approval_count: number;
+  blocked_count: number;
+  error: string | null;
+  trace_length: number;
+}
+
+export interface ScanResultsResponse {
+  results: PerDsResultSummary[];
+}
+
+export const agentApi = {
+  // Run the bounded metadata-only investigation loop for a single datasource.
+  investigate: async (dsId: string, body: InvestigateRequest, userId: string = 'agent'): Promise<InvestigateResponse> => {
+    return apiRequest<InvestigateResponse>(`/agent/${dsId}/investigate`, {
+      method: 'POST',
+      headers: { 'X-User-ID': userId },
+      body: JSON.stringify(body),
+    });
+  },
+
+  // Fan out proactive scan to ALL registered datasources (returns immediately).
+  scanAll: async (body: ScanAllRequest = {}, userId: string = 'agent-auto'): Promise<ScanAllResponse> => {
+    return apiRequest<ScanAllResponse>('/agent/scan-all', {
+      method: 'POST',
+      headers: { 'X-User-ID': userId },
+      body: JSON.stringify(body),
+    });
+  },
+
+  // Poll scan progress (in-progress / completed / failed counts).
+  getScanStatus: async (): Promise<ScanStatusResponse> => {
+    return apiRequest<ScanStatusResponse>('/agent/scan/status');
+  },
+
+  // Retrieve latest per-datasource result summaries (no full trace).
+  getScanResults: async (): Promise<ScanResultsResponse> => {
+    return apiRequest<ScanResultsResponse>('/agent/scan/results');
+  },
+
+  // Recent DESTRUCTIVE_BLOCKED alarms (informational only — never approvable).
+  getDestructiveAlerts: async (dsId: string, limit: number = 100): Promise<{ ds_id: string; alerts: DestructiveAlert[]; count: number }> => {
+    return apiRequest<{ ds_id: string; alerts: DestructiveAlert[]; count: number }>(
+      `/agent/${dsId}/destructive-alerts?limit=${limit}`,
+    );
+  },
+
+  // Append-only audit trail for a single approval.
+  getApprovalAudit: async (dsId: string, approvalId: string): Promise<{ approval_id: string; ds_id: string; audit: AuditEntry[] }> => {
+    return apiRequest(`/agent/${dsId}/approvals/${approvalId}/audit`);
+  },
+
+  // Full cross-DB audit log (all agent + scan + approval actions), newest first.
+  getAuditLog: async (dsId?: string, limit: number = 200): Promise<{ entries: AuditEntry[]; total: number; ds_id: string | null }> => {
+    const q = dsId ? `?ds_id=${encodeURIComponent(dsId)}&limit=${limit}` : `?limit=${limit}`;
+    return apiRequest(`/agent/audit${q}`);
   },
 };
 

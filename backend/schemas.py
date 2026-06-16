@@ -85,6 +85,11 @@ class ApplyResult(BaseModel):
     status: Literal["success", "skipped", "error"] = Field(..., description="Application outcome")
     message: str = Field(..., description="Human-readable result message")
     rollback_sql: Optional[str] = Field(None, description="SQL to undo this change (if applicable)")
+    alert: bool = Field(
+        False,
+        description="True when the guardrail wall blocked a destructive/unknown statement; "
+                    "signals that an out-of-band DESTRUCTIVE_BLOCKED alert should be raised.",
+    )
 
 class ApplySuggestionsDirectRequest(BaseModel):
     """Request to apply suggestions directly with full Suggestion objects"""

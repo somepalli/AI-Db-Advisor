@@ -21,8 +21,10 @@ class Settings(BaseModel):
     DSN_LOCALHOST_REPLACEMENT: str = os.getenv("DSN_LOCALHOST_REPLACEMENT", "host.docker.internal")
 
     # LLM config — provider-agnostic: "ollama" (default), "openai" (OpenAI-compatible), "anthropic"
+    # Primary model: qwen3.5:9b; fallback: granite4.1:8b
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama")
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen2.5:7b-instruct")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.5:9b")
+    LLM_FALLBACK_MODEL: str = os.getenv("LLM_FALLBACK_MODEL", "granite4.1:8b")
     LLM_ENDPOINT: str = os.getenv("LLM_ENDPOINT", "http://127.0.0.1:11434")  # Ollama default
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")  # required for openai/anthropic cloud providers
 
@@ -50,6 +52,14 @@ class Settings(BaseModel):
     # MCP Safety Settings (DO NOT CHANGE)
     MCP_AUTO_EXECUTE: bool = False  # MUST be False
     MCP_REQUIRE_APPROVAL: bool = True  # MUST be True
+
+    # Demo mode: when True, MCP endpoints may fabricate illustrative suggestions /
+    # simulated approvals/executions if no MCP client is configured. Default False —
+    # with no MCP client and demo OFF, those endpoints return 503 instead of faking success.
+    DEMO_MODE: bool = os.getenv("DEMO_MODE", "false").lower() == "true"
+
+    # Where the durable approvals + append-only audit log live (SQLite).
+    APPROVALS_DB_FILE: str = os.getenv("APPROVALS_DB_FILE", "")
 
 settings = Settings()
 

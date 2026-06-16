@@ -8,6 +8,7 @@ import { aiChatApi, chatHistoryApi, optimizationApi, type ChatMessage } from '..
 import { MessageRenderer } from './MessageRenderer';
 import { ChatHistoryDropdown } from './ChatHistoryDropdown';
 import { useOptimization } from '../lib/optimizationContext';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
 interface Props {
   dataSourceId: string | null;
@@ -29,7 +30,12 @@ export function AIAssistant({ dataSourceId }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sessionId, setSessionId] = useState(() => `session_${Date.now()}`);
+  // Persist session ID per datasource so chat history survives app restarts.
+  const sessionKey = `ai-chat-session-${dataSourceId || 'default'}`;
+  const [sessionId, setSessionId] = useLocalStorage<string>(
+    sessionKey,
+    `session_${Date.now()}`,
+  );
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -109,9 +115,9 @@ export function AIAssistant({ dataSourceId }: Props) {
 
     try {
       setHistoryLoaded(false);
+      // Load messages for the persisted session (survives reloads).
       const response = await chatHistoryApi.getSession(dataSourceId, sessionId);
 
-      // Convert history messages to Message format
       const historyMessages: Message[] = response.messages
         .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
         .map((msg) => ({
@@ -121,8 +127,6 @@ export function AIAssistant({ dataSourceId }: Props) {
 
       setMessages(historyMessages);
       setHistoryLoaded(true);
-
-      console.log(`Loaded ${historyMessages.length} messages from session ${sessionId}`);
     } catch (err) {
       console.error('Failed to load chat history:', err);
       setMessages([]);
@@ -131,10 +135,10 @@ export function AIAssistant({ dataSourceId }: Props) {
   };
 
   const handleNewSession = () => {
+    // Persist the new session ID so it's reused next reload.
     const newSessionId = `session_${Date.now()}`;
     setSessionId(newSessionId);
     setMessages([]);
-    console.log(`Created new session: ${newSessionId}`);
   };
 
   const handleSessionChange = async (newSessionId: string) => {

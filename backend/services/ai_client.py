@@ -26,9 +26,11 @@ class LLMClient:
     """
 
     def __init__(self, provider: str | None = None, model: str | None = None,
-                 endpoint: str | None = None, api_key: str | None = None):
+                 endpoint: str | None = None, api_key: str | None = None,
+                 fallback_model: str | None = None):
         self.provider = (provider or settings.LLM_PROVIDER or "ollama").lower()
         self.model = model or settings.LLM_MODEL
+        self.fallback_model = fallback_model if fallback_model is not None else getattr(settings, "LLM_FALLBACK_MODEL", "")
         # In a container, a localhost endpoint (e.g. a host-run Ollama) must be
         # redirected to the host machine; no-op outside a container (flag off).
         self.endpoint = maybe_rewrite_localhost_url((endpoint or settings.LLM_ENDPOINT)).rstrip("/")
@@ -39,7 +41,25 @@ class LLMClient:
     def chat(self, messages: List[Dict[str, str]], json_response: bool = False,
              temperature: float = 0.2, max_tokens: int = 1500, stream: bool = False):
         """Return the full completion text (stream=False) or a generator of text chunks
-        (stream=True). When json_response is True the text is parsed into JSON if possible."""
+        (stream=True). When json_response is True the text is parsed into JSON if possible.
+        On failure, retries once with fallback_model if configured (non-streaming only)."""
+        try:
+            return self._dispatch(messages, json_response, temperature, max_tokens, stream)
+        except Exception as primary_err:
+            if self.fallback_model and self.fallback_model != self.model and not stream:
+                logger.warning(
+                    "Primary model '%s' failed (%s), retrying with fallback '%s'",
+                    self.model, primary_err, self.fallback_model,
+                )
+                original = self.model
+                self.model = self.fallback_model
+                try:
+                    return self._dispatch(messages, json_response, temperature, max_tokens, stream)
+                finally:
+                    self.model = original
+            raise
+
+    def _dispatch(self, messages, json_response, temperature, max_tokens, stream):
         if self.provider == "ollama":
             return self._chat_ollama(messages, json_response, temperature, max_tokens, stream)
         if self.provider in ("openai", "openai-compatible"):
@@ -58,6 +78,7 @@ class LLMClient:
         info: Dict[str, Any] = {
             "provider": self.provider,
             "model": self.model,
+            "fallback_model": self.fallback_model,
             "endpoint": self.endpoint,
             "connected": False,
             "models": [],

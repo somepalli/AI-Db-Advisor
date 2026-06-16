@@ -24,7 +24,7 @@ LLM_SETTINGS_FILE = Path(
 )
 
 # Settings fields we allow the UI to override.
-_FIELDS = ("LLM_PROVIDER", "LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY", "LLM_PROVIDER_TRUST")
+_FIELDS = ("LLM_PROVIDER", "LLM_MODEL", "LLM_FALLBACK_MODEL", "LLM_ENDPOINT", "LLM_API_KEY", "LLM_PROVIDER_TRUST")
 
 
 def resolve_provider_trust() -> str:
