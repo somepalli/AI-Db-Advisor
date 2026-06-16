@@ -51,6 +51,15 @@ class FakeAgent:
     def get_existing_indexes(self, table=None):
         return []
 
+    def get_top_queries(self, limit=10):
+        return []
+
+    def stats(self):
+        return {}
+
+    def locks(self):
+        return []
+
 
 class TestInvariants:
     def test_toolset_metadata_only(self):

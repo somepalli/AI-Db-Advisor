@@ -76,6 +76,10 @@ class TestAgentLoopEmitsExactlyOneAlert:
         class FakeAgent:
             def get_db_type(self): return "postgres"
             def get_schema(self): return {}
+            def get_existing_indexes(self, table=None): return []
+            def get_top_queries(self, limit=10): return []
+            def stats(self): return {}
+            def locks(self): return []
 
         result = await run_investigation("pg-a", "tidy", llm=FakeLLM(), agent=FakeAgent())
         assert result["approval_ids"] == []
