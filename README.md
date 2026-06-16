@@ -11,6 +11,10 @@ AI DB Advisor combines rule-based query analysis, AI-powered chat/optimization, 
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
+![AI DB Advisor demo: schema explorer, AI chat index suggestions, and the autonomous Agent tab](docs/assets/demo.gif)
+
+*Schema explorer + SQL editor → AI chat suggesting an index from live metadata → the Agentic DBA tab running an investigation, a full-fleet scan, and its audit log — all against a real Postgres connection, captured from the running app.*
+
 ---
 
 ## 🚀 Run with Docker (fastest)
